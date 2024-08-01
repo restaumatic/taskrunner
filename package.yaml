@@ -21,29 +21,74 @@ description:         Please see the README on GitHub at <https://github.com/gith
 
 dependencies:
 - base >= 4.7 && < 5
+- universum
+- containers
+- text
+- filepath
+- directory
+- data-default
+- bytestring
+- unix
+- process
+- async
+- time
+
+default-extensions:
+  - OverloadedStrings
+  - DuplicateRecordFields
+  - OverloadedRecordDot
+  - DerivingStrategies
+  - DerivingVia
+  - DeriveGeneric
+  - GeneralizedNewtypeDeriving
+  - BlockArguments
+  - FlexibleContexts
+  - TupleSections
+  - NamedFieldPuns
+  - LambdaCase
+  - MultiWayIf
+  - NoImplicitPrelude
+  - ScopedTypeVariables
+  - MultiParamTypeClasses
+  - FunctionalDependencies
+  - TypeSynonymInstances
+  - FlexibleInstances
+  - FlexibleContexts
+  - ExplicitNamespaces
+  - PatternSynonyms
+  - ImportQualifiedPost
+  - OverloadedLabels
+  - TypeApplications
+  - DeriveAnyClass
+  - ViewPatterns
+  - DataKinds
+  - TypeFamilies
+  - RecordWildCards
+  - DeriveTraversable
+  - DeriveFoldable
+  - TypeOperators
 
 ghc-options:
 - -Wall
 - -Wcompat
 - -Widentities
-- -Wincomplete-record-updates
-- -Wincomplete-uni-patterns
-- -Wmissing-export-lists
+- -Werror=incomplete-record-updates
+- -Werror=incomplete-uni-patterns
 - -Wmissing-home-modules
-- -Wpartial-fields
+- -Werror=partial-fields
 - -Wredundant-constraints
 
 library:
   source-dirs: src
 
 executables:
-  taskrunner-exe:
+  taskrunner:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
+    # Note: -threaded is actually needed even if we don't need multicore, see https://hackage.haskell.org/package/process-1.6.20.0/docs/System-Process.html#v:waitForProcess
+    # > GHC Note: in order to call waitForProcess without blocking all the other threads in the system, you must compile the program with -threaded.
     - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
     dependencies:
     - taskrunner
 
@@ -53,7 +98,7 @@ tests:
     source-dirs:         test
     ghc-options:
     - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
     dependencies:
     - taskrunner
+    - tasty
+    - tasty-golden

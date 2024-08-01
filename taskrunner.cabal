@@ -25,19 +25,64 @@ source-repository head
 
 library
   exposed-modules:
-      Lib
+      App
   other-modules:
       Paths_taskrunner
   autogen-modules:
       Paths_taskrunner
   hs-source-dirs:
       src
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  default-extensions:
+      OverloadedStrings
+      DuplicateRecordFields
+      OverloadedRecordDot
+      DerivingStrategies
+      DerivingVia
+      DeriveGeneric
+      GeneralizedNewtypeDeriving
+      BlockArguments
+      FlexibleContexts
+      TupleSections
+      NamedFieldPuns
+      LambdaCase
+      MultiWayIf
+      NoImplicitPrelude
+      ScopedTypeVariables
+      MultiParamTypeClasses
+      FunctionalDependencies
+      TypeSynonymInstances
+      FlexibleInstances
+      FlexibleContexts
+      ExplicitNamespaces
+      PatternSynonyms
+      ImportQualifiedPost
+      OverloadedLabels
+      TypeApplications
+      DeriveAnyClass
+      ViewPatterns
+      DataKinds
+      TypeFamilies
+      RecordWildCards
+      DeriveTraversable
+      DeriveFoldable
+      TypeOperators
+  ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints
   build-depends:
-      base >=4.7 && <5
+      async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , data-default
+    , directory
+    , filepath
+    , process
+    , text
+    , time
+    , universum
+    , unix
   default-language: Haskell2010
 
-executable taskrunner-exe
+executable taskrunner
   main-is: Main.hs
   other-modules:
       Paths_taskrunner
@@ -45,10 +90,55 @@ executable taskrunner-exe
       Paths_taskrunner
   hs-source-dirs:
       app
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  default-extensions:
+      OverloadedStrings
+      DuplicateRecordFields
+      OverloadedRecordDot
+      DerivingStrategies
+      DerivingVia
+      DeriveGeneric
+      GeneralizedNewtypeDeriving
+      BlockArguments
+      FlexibleContexts
+      TupleSections
+      NamedFieldPuns
+      LambdaCase
+      MultiWayIf
+      NoImplicitPrelude
+      ScopedTypeVariables
+      MultiParamTypeClasses
+      FunctionalDependencies
+      TypeSynonymInstances
+      FlexibleInstances
+      FlexibleContexts
+      ExplicitNamespaces
+      PatternSynonyms
+      ImportQualifiedPost
+      OverloadedLabels
+      TypeApplications
+      DeriveAnyClass
+      ViewPatterns
+      DataKinds
+      TypeFamilies
+      RecordWildCards
+      DeriveTraversable
+      DeriveFoldable
+      TypeOperators
+  ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints -threaded
   build-depends:
-      base >=4.7 && <5
+      async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , data-default
+    , directory
+    , filepath
+    , process
     , taskrunner
+    , text
+    , time
+    , universum
+    , unix
   default-language: Haskell2010
 
 test-suite taskrunner-test
@@ -60,8 +150,55 @@ test-suite taskrunner-test
       Paths_taskrunner
   hs-source-dirs:
       test
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  default-extensions:
+      OverloadedStrings
+      DuplicateRecordFields
+      OverloadedRecordDot
+      DerivingStrategies
+      DerivingVia
+      DeriveGeneric
+      GeneralizedNewtypeDeriving
+      BlockArguments
+      FlexibleContexts
+      TupleSections
+      NamedFieldPuns
+      LambdaCase
+      MultiWayIf
+      NoImplicitPrelude
+      ScopedTypeVariables
+      MultiParamTypeClasses
+      FunctionalDependencies
+      TypeSynonymInstances
+      FlexibleInstances
+      FlexibleContexts
+      ExplicitNamespaces
+      PatternSynonyms
+      ImportQualifiedPost
+      OverloadedLabels
+      TypeApplications
+      DeriveAnyClass
+      ViewPatterns
+      DataKinds
+      TypeFamilies
+      RecordWildCards
+      DeriveTraversable
+      DeriveFoldable
+      TypeOperators
+  ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints -threaded
   build-depends:
-      base >=4.7 && <5
+      async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , data-default
+    , directory
+    , filepath
+    , process
     , taskrunner
+    , tasty
+    , tasty-golden
+    , text
+    , time
+    , universum
+    , unix
   default-language: Haskell2010

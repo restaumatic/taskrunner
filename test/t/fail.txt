@@ -1,0 +1,2 @@
+echo "I will fail" >&2
+exit 42

@@ -1,0 +1,3 @@
+-- output:
+[sh] stderr | I will fail
+-- exit code: 42

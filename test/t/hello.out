@@ -1,1 +1,2 @@
-echo "Hello World"
+-- output:
+[sh] stdout | Hello World

@@ -76,6 +76,7 @@ library
     , directory
     , filepath
     , process
+    , temporary
     , text
     , time
     , universum
@@ -135,6 +136,7 @@ executable taskrunner
     , filepath
     , process
     , taskrunner
+    , temporary
     , text
     , time
     , universum
@@ -197,6 +199,7 @@ test-suite taskrunner-test
     , taskrunner
     , tasty
     , tasty-golden
+    , temporary
     , text
     , time
     , universum

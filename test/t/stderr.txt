@@ -1,0 +1,6 @@
+echo "This will appear on stdout"
+echo "This will appear on stderr" >&2
+# Crude attempt at sequencing
+sleep 0.1
+echo "stdout again"
+echo "stderr again" >&2

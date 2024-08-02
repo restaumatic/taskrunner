@@ -1,0 +1,3 @@
+echo "Toplevel task"
+taskrunner echo "Nested task"
+echo "Toplevel task again"

@@ -8,6 +8,7 @@ import System.Process (proc, createPipe, CreateProcess (..), StdStream (..), wit
 import System.IO
 import System.IO.Temp (withSystemTempDirectory)
 import System.Exit (ExitCode(..))
+import System.Environment (getEnv)
 
 main :: IO ()
 main = defaultMain =<< goldenTests
@@ -32,6 +33,7 @@ runTest source = do
     let logDir = dir </> "logs"
 
     (pipeRead, pipeWrite) <- createPipe
+    path <- getEnv "PATH"
     withCreateProcess
       (proc "taskrunner"
         [ "sh"
@@ -41,6 +43,7 @@ runTest source = do
         , env = Just
           [ ("TASKRUNNER_LOG_DIRECTORY", logDir)
           , ("TASKRUNNER_DISABLE_TIMESTAMPS", "1")
+          , ("PATH", path)
           ]
         } \_ _ _ processHandle -> do
 

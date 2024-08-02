@@ -1,0 +1,4 @@
+-- output:
+[sh] stdout | Toplevel task
+[echo] stdout | Nested task
+[sh] stdout | Toplevel task again

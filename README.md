@@ -46,6 +46,7 @@
   - Only some because there can be benign changes
 - Can dump enough info to reproduce failures
   - For example: hashes of inputs, caches etc.
+- Generate a trace (otlp for analysis, or render to a gantt chart)
 
 ## Things we should do better than previous version
 

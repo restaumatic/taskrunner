@@ -69,7 +69,8 @@ library
       TypeOperators
   ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints
   build-depends:
-      async
+      Glob
+    , async
     , base >=4.7 && <5
     , bytestring
     , containers
@@ -130,7 +131,8 @@ executable taskrunner
       TypeOperators
   ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints -threaded
   build-depends:
-      async
+      Glob
+    , async
     , base >=4.7 && <5
     , bytestring
     , containers
@@ -193,7 +195,8 @@ test-suite taskrunner-test
       TypeOperators
   ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints -threaded
   build-depends:
-      async
+      Glob
+    , async
     , base >=4.7 && <5
     , bytestring
     , containers

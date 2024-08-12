@@ -9,6 +9,9 @@ import System.IO
 import System.IO.Temp (withSystemTempDirectory)
 import System.Exit (ExitCode(..))
 import System.Environment (getEnv)
+import Data.Text qualified as Text
+import System.FilePath.Glob as Glob
+import System.FilePath qualified as FP
 
 main :: IO ()
 main = defaultMain =<< goldenTests
@@ -28,8 +31,7 @@ goldenTests = do
 runTest :: String -> IO LBS.ByteString
 runTest source = do
   withSystemTempDirectory "testrunner-test" \dir -> do
-    -- TODO: call process, get output, get logfiles
-
+    let checkFileGlob = getCheckFileGlob (toText source)
     let logDir = dir </> "logs"
 
     (pipeRead, pipeWrite) <- createPipe
@@ -56,10 +58,29 @@ runTest source = do
 
       exitCode <- waitForProcess processHandle
 
+      checkFiles <-
+        case checkFileGlob of
+          Nothing ->
+            pure mempty
+          Just g -> do
+            files <- globDir1 (Glob.compile g) dir
+            forM files \file -> do
+              content <- LBS.readFile file
+              let relativeFilename = FP.makeRelative dir file
+              pure $ "-- " <> encodeUtf8 relativeFilename <> ":\n" <> content
+
       pure $ mconcat
         [ "-- output:\n"
         , output
+        , mconcat checkFiles
         , case exitCode of
             ExitSuccess -> ""
             ExitFailure code -> "-- exit code: " <> show code <> "\n"
         ]
+
+getCheckFileGlob :: Text -> Maybe String
+getCheckFileGlob source =
+  case lines source of
+    firstLine:_ ->
+      toString <$> Text.stripPrefix "# check " firstLine
+    _ -> Nothing

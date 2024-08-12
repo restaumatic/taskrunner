@@ -1,0 +1,8 @@
+-- output:
+[mytask] stdout | some standard output
+[mytask] stdout | more standard output
+[mytask] stderr | some standard error
+-- logs/mytask.log:
+stdout | some standard output
+stdout | more standard output
+stderr | some standard error

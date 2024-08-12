@@ -44,9 +44,11 @@ runTest source = do
         ]) { std_out = UseHandle pipeWrite, std_err = UseHandle pipeWrite
         , env = Just
           [ ("TASKRUNNER_LOG_DIRECTORY", logDir)
+          , ("TASKRUNNER_LOCK_DIRECTORY", dir </> "locks")
           , ("TASKRUNNER_DISABLE_TIMESTAMPS", "1")
           , ("PATH", path)
           ]
+        , cwd = Just dir
         } \_ _ _ processHandle -> do
 
       output <- LBS.hGetContents pipeRead

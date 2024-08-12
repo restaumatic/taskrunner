@@ -17,18 +17,22 @@ import System.IO.Error (isEOFError)
 import System.Posix.ByteString (stdOutput, fdToHandle)
 import System.Posix (Fd, dup, stdError)
 import CliArgs
+import System.FileLock (withFileLock, SharedExclusive (Exclusive))
 
 data Settings = Settings
   { logDirectory :: FilePath
+  , lockDirectory :: FilePath
   , timestamps :: Bool
   }
 
 getSettings :: IO Settings
 getSettings = do
   logDirectory <- fromMaybe "/tmp/taskrunner/logs" <$> lookupEnv "TASKRUNNER_LOG_DIRECTORY"
+  lockDirectory <- fromMaybe "/tmp/taskrunner/locks" <$> lookupEnv "TASKRUNNER_LOCK_DIRECTORY"
   timestamps <- (/=Just "1") <$> lookupEnv "TASKRUNNER_DISABLE_TIMESTAMPS"
   pure Settings
         { logDirectory
+        , lockDirectory
         , timestamps
         }
 
@@ -40,35 +44,41 @@ main = do
   -- TODO: better inference
   let jobName = fromMaybe (FilePath.takeFileName args.cmd) args.name
 
-  createDirectoryIfMissing True settings.logDirectory
+  let lockFileName = settings.lockDirectory </> (jobName <> ".lock")
+  let logFileName = settings.logDirectory </> (jobName <> ".log")
 
-  -- Lock (take) it while writing a line to either `logFile` or stdout
-  logFileMutex <- newMVar ()
-  logFile <- openBinaryFile (settings.logDirectory </> (jobName <> ".log")) WriteMode
-  hSetBuffering logFile LineBuffering
+  createDirectoryIfMissing True settings.lockDirectory
 
-  devnull <- openBinaryFile "/dev/null" WriteMode
+  withFileLock lockFileName Exclusive \_ -> do
+    createDirectoryIfMissing True settings.logDirectory
 
-  toplevelStdout <- toplevelStream "_taskrunner_toplevel_stdout" stdOutput
-  toplevelStderr <- toplevelStream "_taskrunner_toplevel_stderr" stdError
+    -- Lock (take) it while writing a line to either `logFile` or stdout
+    logFileMutex <- newMVar ()
+    logFile <- openBinaryFile logFileName WriteMode
+    hSetBuffering logFile LineBuffering
 
-  -- TODO: handle spawn error here
-  -- TODO: should we use withCreateProcess?
-  -- TODO: should we use delegate_ctlc or DIY? See https://hackage.haskell.org/package/process-1.6.20.0/docs/System-Process.html#g:4
-  -- -> We should DIY because we need to flush stream etc.
-  (_, Just stdoutPipe, Just stderrPipe, processHandle) <- createProcess
-    (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe, std_err = CreatePipe }
+    devnull <- openBinaryFile "/dev/null" WriteMode
 
-  stdoutHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFileMutex logFile toplevelStdout "stdout" stdoutPipe
-  stderrHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFileMutex logFile toplevelStderr "stderr" stderrPipe
+    toplevelStdout <- toplevelStream "_taskrunner_toplevel_stdout" stdOutput
+    toplevelStderr <- toplevelStream "_taskrunner_toplevel_stderr" stdError
 
-  exitCode <- waitForProcess processHandle
+    -- TODO: handle spawn error here
+    -- TODO: should we use withCreateProcess?
+    -- TODO: should we use delegate_ctlc or DIY? See https://hackage.haskell.org/package/process-1.6.20.0/docs/System-Process.html#g:4
+    -- -> We should DIY because we need to flush stream etc.
+    (_, Just stdoutPipe, Just stderrPipe, processHandle) <- createProcess
+      (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe, std_err = CreatePipe }
 
-  -- TODO: timeout here
-  wait stdoutHandler
-  wait stderrHandler
+    stdoutHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFileMutex logFile toplevelStdout "stdout" stdoutPipe
+    stderrHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFileMutex logFile toplevelStderr "stderr" stderrPipe
 
-  exitWith exitCode
+    exitCode <- waitForProcess processHandle
+
+    -- TODO: timeout here
+    wait stdoutHandler
+    wait stderrHandler
+
+    exitWith exitCode
 
 toplevelStream :: String -> Fd -> IO Handle
 toplevelStream envName fd = do

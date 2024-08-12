@@ -1,0 +1,30 @@
+# This test that tasks with the same name contend on the same lock.
+# Ordering is crudely approximated using `sleep`.
+#
+# Explanation:
+# First locked task will start first (the second parallel job is retarded by one second)
+# But once inside the task, it sleeps 2 seconds. So if the locking was broken,
+# the two tasks would run in parallel with `second` being written first (after
+# ~1 second), and then `first` (after ~2 seconds).
+#
+# With locking, the result should be `first` then `second`.
+#
+# The markers are written to a file, to make the test somewhat independent of nested output handling.
+
+(
+  taskrunner -n locked sh -c '
+    sleep 2
+    echo first >> state.txt
+  '
+) &
+
+(
+  sleep 1
+  taskrunner -n locked sh -c '
+    echo second >> state.txt
+  '
+) &
+
+wait
+
+cat state.txt

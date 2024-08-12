@@ -1,0 +1,6 @@
+-- logs/foo.log:
+stdout | foo standard output
+stderr | foo standard error
+-- logs/bar.log:
+stdout | bar standard output
+stderr | bar standard error

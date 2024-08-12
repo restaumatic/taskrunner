@@ -1,0 +1,12 @@
+# check logs/foo.log logs/bar.log
+taskrunner -n foo sh -c '
+  echo "foo standard output"
+  sleep 0.1
+  echo "foo standard error" >&2
+' &
+taskrunner -n bar sh -c '
+  echo "bar standard output"
+  sleep 0.1
+  echo "bar standard error" >&2
+' &
+wait

@@ -11,7 +11,6 @@ import System.Directory (createDirectoryIfMissing)
 import qualified Data.ByteString.Char8 as B8
 import Control.Concurrent.Async (async, wait)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
-import Control.Concurrent (withMVar)
 import Control.Exception.Base (handle, throwIO)
 import System.IO.Error (isEOFError)
 import System.Posix.ByteString (stdOutput, fdToHandle)
@@ -53,7 +52,6 @@ main = do
     createDirectoryIfMissing True settings.logDirectory
 
     -- Lock (take) it while writing a line to either `logFile` or stdout
-    logFileMutex <- newMVar ()
     logFile <- openBinaryFile logFileName WriteMode
     hSetBuffering logFile LineBuffering
 
@@ -69,8 +67,8 @@ main = do
     (_, Just stdoutPipe, Just stderrPipe, processHandle) <- createProcess
       (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe, std_err = CreatePipe }
 
-    stdoutHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFileMutex logFile toplevelStdout "stdout" stdoutPipe
-    stderrHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFileMutex logFile toplevelStderr "stderr" stderrPipe
+    stdoutHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFile toplevelStdout "stdout" stdoutPipe
+    stderrHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFile toplevelStderr "stderr" stderrPipe
 
     exitCode <- waitForProcess processHandle
 
@@ -99,8 +97,8 @@ toplevelStream envName fd = do
   hSetBuffering h LineBuffering
   pure h
 
-outputStreamHandler :: Settings -> ByteString -> MVar () -> Handle -> Handle -> ByteString -> Handle -> IO ()
-outputStreamHandler settings jobName logFileMutex logFile toplevelOutput streamName stream =
+outputStreamHandler :: Settings -> ByteString -> Handle -> Handle -> ByteString -> Handle -> IO ()
+outputStreamHandler settings jobName logFile toplevelOutput streamName stream =
   handle ignoreEOF $ forever do
     line <- B8.hGetLine stream
     timestamp <- getCurrentTime
@@ -109,12 +107,12 @@ outputStreamHandler settings jobName logFileMutex logFile toplevelOutput streamN
               -- TODO: add milliseconds somehow
               B8.pack (formatTime defaultTimeLocale "%T" timestamp) <> " "
           | otherwise = ""
-    withMVar logFileMutex \_ -> do
-      B8.hPutStrLn logFile $ timestampStr <> streamName <> " | " <> line
 
-      -- FIXME: since toplevelOutput is shared between multiple processes, the mutex makes little sense...
-      -- We should probably just rely on atomicity of writes (and hope LineBuffering always works as expected)
-      B8.hPutStrLn toplevelOutput $ timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
+    B8.hPutStrLn logFile $ timestampStr <> streamName <> " | " <> line
+
+    -- FIXME: since toplevelOutput is shared between multiple processes, the mutex makes little sense...
+    -- We should probably just rely on atomicity of writes (and hope LineBuffering always works as expected)
+    B8.hPutStrLn toplevelOutput $ timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
 
   where
     ignoreEOF e | isEOFError e = pure ()

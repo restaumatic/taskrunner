@@ -33,6 +33,7 @@ dependencies:
 - async
 - time
 - temporary
+- optparse-applicative
 
 default-extensions:
   - OverloadedStrings

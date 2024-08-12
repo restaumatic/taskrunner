@@ -36,7 +36,9 @@ runTest source = do
     path <- getEnv "PATH"
     withCreateProcess
       (proc "taskrunner"
-        [ "sh"
+        [ "-n"
+        , "toplevel"
+        , "sh"
         , "-c"
         , source
         ]) { std_out = UseHandle pipeWrite, std_err = UseHandle pipeWrite

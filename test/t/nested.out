@@ -1,4 +1,4 @@
 -- output:
-[sh] stdout | Toplevel task
-[echo] stdout | Nested task
-[sh] stdout | Toplevel task again
+[toplevel] stdout | Toplevel task
+[nested] stdout | Nested task
+[toplevel] stdout | Toplevel task again

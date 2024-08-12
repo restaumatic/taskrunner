@@ -1,2 +1,2 @@
 -- output:
-[sh] stdout | Hello World
+[toplevel] stdout | Hello World

@@ -26,6 +26,7 @@ source-repository head
 library
   exposed-modules:
       App
+      CliArgs
   other-modules:
       Paths_taskrunner
   autogen-modules:
@@ -75,6 +76,7 @@ library
     , data-default
     , directory
     , filepath
+    , optparse-applicative
     , process
     , temporary
     , text
@@ -134,6 +136,7 @@ executable taskrunner
     , data-default
     , directory
     , filepath
+    , optparse-applicative
     , process
     , taskrunner
     , temporary
@@ -195,6 +198,7 @@ test-suite taskrunner-test
     , data-default
     , directory
     , filepath
+    , optparse-applicative
     , process
     , taskrunner
     , tasty

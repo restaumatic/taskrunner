@@ -1,5 +1,5 @@
 -- output:
-[sh] stdout | This will appear on stdout
-[sh] stderr | This will appear on stderr
-[sh] stdout | stdout again
-[sh] stderr | stderr again
+[toplevel] stdout | This will appear on stdout
+[toplevel] stderr | This will appear on stderr
+[toplevel] stdout | stdout again
+[toplevel] stderr | stderr again

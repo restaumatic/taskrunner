@@ -2,7 +2,7 @@ module App where
 
 import Universum
 
-import System.Environment (getArgs, setEnv, lookupEnv)
+import System.Environment (setEnv, lookupEnv)
 import System.Process (createProcess, CreateProcess (std_in, std_out, std_err), StdStream (CreatePipe, UseHandle), proc, waitForProcess)
 import System.IO (openBinaryFile, hSetBuffering, BufferMode (LineBuffering))
 import qualified System.FilePath as FilePath
@@ -16,6 +16,7 @@ import Control.Exception.Base (handle, throwIO)
 import System.IO.Error (isEOFError)
 import System.Posix.ByteString (stdOutput, fdToHandle)
 import System.Posix (Fd, dup, stdError)
+import CliArgs
 
 data Settings = Settings
   { logDirectory :: FilePath
@@ -33,12 +34,11 @@ getSettings = do
 
 main :: IO ()
 main = do
-  (cmd:args) <- getArgs
-
+  args <- getCliArgs
   settings <- getSettings
 
-  -- TODO: better inference, and add an option for manual override
-  let jobName = FilePath.takeFileName cmd
+  -- TODO: better inference
+  let jobName = fromMaybe (FilePath.takeFileName args.cmd) args.name
 
   createDirectoryIfMissing True settings.logDirectory
 
@@ -57,7 +57,7 @@ main = do
   -- TODO: should we use delegate_ctlc or DIY? See https://hackage.haskell.org/package/process-1.6.20.0/docs/System-Process.html#g:4
   -- -> We should DIY because we need to flush stream etc.
   (_, Just stdoutPipe, Just stderrPipe, processHandle) <- createProcess
-    (proc cmd args) { std_in = UseHandle devnull, std_out = CreatePipe, std_err = CreatePipe }
+    (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe, std_err = CreatePipe }
 
   stdoutHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFileMutex logFile toplevelStdout "stdout" stdoutPipe
   stderrHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFileMutex logFile toplevelStderr "stderr" stderrPipe

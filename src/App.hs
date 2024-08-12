@@ -2,8 +2,8 @@ module App where
 
 import Universum
 
-import System.Environment (setEnv, lookupEnv)
-import System.Process (createProcess, CreateProcess (std_in, std_out, std_err), StdStream (CreatePipe, UseHandle), proc, waitForProcess)
+import System.Environment (setEnv, lookupEnv, getEnvironment)
+import System.Process (createProcess, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess)
 import System.IO (openBinaryFile, hSetBuffering, BufferMode (LineBuffering))
 import qualified System.FilePath as FilePath
 import System.FilePath ((</>))
@@ -60,12 +60,18 @@ main = do
     toplevelStdout <- toplevelStream "_taskrunner_toplevel_stdout" stdOutput
     toplevelStderr <- toplevelStream "_taskrunner_toplevel_stderr" stdError
 
+    parentEnv <- getEnvironment
+
     -- TODO: handle spawn error here
     -- TODO: should we use withCreateProcess?
     -- TODO: should we use delegate_ctlc or DIY? See https://hackage.haskell.org/package/process-1.6.20.0/docs/System-Process.html#g:4
     -- -> We should DIY because we need to flush stream etc.
     (_, Just stdoutPipe, Just stderrPipe, processHandle) <- createProcess
-      (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe, std_err = CreatePipe }
+      (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe, std_err = CreatePipe,
+        env=Just $
+          [ ("BASH_FUNC_snapshot%%", "() { :;}")
+          ] <> parentEnv
+        }
 
     stdoutHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFile toplevelStdout "stdout" stdoutPipe
     stderrHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFile toplevelStderr "stderr" stderrPipe

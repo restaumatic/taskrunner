@@ -38,7 +38,8 @@ runTest source = do
       (proc "taskrunner"
         [ "-n"
         , "toplevel"
-        , "sh"
+        , "bash"
+        , "-e"
         , "-c"
         , source
         ]) { std_out = UseHandle pipeWrite, std_err = UseHandle pipeWrite

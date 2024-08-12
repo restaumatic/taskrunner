@@ -1,0 +1,21 @@
+# This test that we can run two different tasks in parallel.
+# Ordering is crudely approximated using `sleep`.
+
+(
+  taskrunner -n task1 sh -c '
+    echo first
+    sleep 2
+    echo third
+  '
+) &
+
+(
+  taskrunner -n task2 sh -c '
+    sleep 1
+    echo second
+  '
+) &
+
+wait
+
+echo "tasks finished"

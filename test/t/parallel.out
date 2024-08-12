@@ -1,0 +1,5 @@
+-- output:
+[task1] stdout | first
+[task2] stdout | second
+[task1] stdout | third
+[toplevel] stdout | tasks finished

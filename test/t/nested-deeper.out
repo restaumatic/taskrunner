@@ -1,0 +1,5 @@
+-- output:
+[toplevel] stdout | Level 1
+[nested] stdout | Level 2
+[nested_again] stdout | Level 3
+[toplevel] stdout | Toplevel task again

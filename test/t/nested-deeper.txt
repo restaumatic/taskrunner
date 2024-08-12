@@ -1,0 +1,6 @@
+echo "Level 1"
+taskrunner -n nested sh -c '
+  echo "Level 2"
+  taskrunner -n nested_again echo "Level 3"
+'
+echo "Toplevel task again"

@@ -1,0 +1,20 @@
+# no toplevel
+# Same as "lock" test, but without toplevel wrapper. This checks that the lock is truly system-wide.
+
+(
+  taskrunner -n locked sh -c '
+    sleep 2
+    echo first >> state.txt
+  '
+) &
+
+(
+  sleep 1
+  taskrunner -n locked sh -c '
+    echo second >> state.txt
+  '
+) &
+
+wait
+
+cat state.txt

@@ -11,6 +11,7 @@ import System.Exit (ExitCode(..))
 import System.Environment (getEnv)
 import System.FilePath.Glob as Glob
 import System.FilePath qualified as FP
+import Data.Default (Default(..))
 
 main :: IO ()
 main = defaultMain =<< goldenTests
@@ -31,18 +32,25 @@ runTest :: String -> IO LBS.ByteString
 runTest source = do
   withSystemTempDirectory "testrunner-test" \dir -> do
     let logDir = dir </> "logs"
+    let options = getOptions (toText source)
 
     (pipeRead, pipeWrite) <- createPipe
     path <- getEnv "PATH"
+
+    let
+      bashArgs = [ "-e", "-c", source]
+      initialProc
+          | options.toplevel =
+              proc "taskrunner" $
+                [ "-n"
+                , "toplevel"
+                , "bash"
+                ] <> bashArgs
+          | otherwise =
+              proc "bash" bashArgs
+
     withCreateProcess
-      (proc "taskrunner"
-        [ "-n"
-        , "toplevel"
-        , "bash"
-        , "-e"
-        , "-c"
-        , source
-        ]) { std_out = UseHandle pipeWrite, std_err = UseHandle pipeWrite
+      initialProc { std_out = UseHandle pipeWrite, std_err = UseHandle pipeWrite
           , env = Just
             [ ("TASKRUNNER_LOG_DIRECTORY", logDir)
             , ("TASKRUNNER_LOCK_DIRECTORY", dir </> "locks")
@@ -57,13 +65,12 @@ runTest source = do
 
       exitCode <- waitForProcess processHandle
 
-      let checkFileGlobs = fromMaybe ["output"] $ getCheckFileGlobs (toText source)
-      checkFiles <- 
-        forM checkFileGlobs \glob' ->
+      checkFiles <-
+        forM options.checkFileGlobs \glob' ->
           if glob' == "output" then
             pure ["-- output:\n" <> output]
           else do
-            files <- globDir1 (Glob.compile glob') dir
+            files <- globDir1 (Glob.compile (toString glob')) dir
             forM files \file -> do
               content <- LBS.readFile file
               let relativeFilename = FP.makeRelative dir file
@@ -76,10 +83,29 @@ runTest source = do
             ExitFailure code -> "-- exit code: " <> show code <> "\n"
         ]
 
-getCheckFileGlobs :: Text -> Maybe [String]
-getCheckFileGlobs source =
-  case lines source of
-    firstLine:_
-      | "#": "check":globs <- words firstLine ->
-        Just $ toString <$> globs
-    _ -> Nothing
+data Options = Options
+  { checkFileGlobs :: [Text]
+  , toplevel :: Bool
+  }
+
+instance Default Options where
+  def = Options
+    { checkFileGlobs = ["output"]
+    , toplevel = True
+    }
+
+getOptions :: Text -> Options
+getOptions source = flip execState def $ go (lines source)
+  where
+  go (line:rest) =
+    case words line of
+      "#": "check":globs -> do
+        modify (\s -> s { checkFileGlobs = globs })
+        go rest
+      ["#", "no", "toplevel"] -> do
+        modify (\s -> s { toplevel = False })
+        go rest
+      _ ->
+        -- stop iteration
+        pure ()
+  go [] = pure ()

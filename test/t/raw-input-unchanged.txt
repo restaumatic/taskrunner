@@ -1,0 +1,12 @@
+# no toplevel
+
+go() {
+  taskrunner -n mytask bash -e -c '
+    snapshot --raw "${input}"
+    echo "Expensive computation, input is: ${input}"
+  '
+}
+
+export input=lol
+go
+go

@@ -5,11 +5,11 @@ module App where
 import Universum
 
 import System.Environment (setEnv, lookupEnv, getEnvironment)
-import System.Process (createProcess, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe)
-import System.IO (openBinaryFile, hSetBuffering, BufferMode (LineBuffering))
+import System.Process (createProcess, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe, readProcess)
+import System.IO (openBinaryFile, hSetBuffering, BufferMode (LineBuffering) )
 import qualified System.FilePath as FilePath
 import System.FilePath ((</>))
-import System.Directory (createDirectoryIfMissing)
+import System.Directory (createDirectoryIfMissing, doesFileExist)
 import qualified Data.ByteString.Char8 as B8
 import Control.Concurrent.Async (async, wait, cancel)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
@@ -24,11 +24,17 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as BL
 import SnapshotCliArgs (SnapshotCliArgs)
 import SnapshotCliArgs qualified 
+import Data.Text qualified as Text
+import qualified Data.Text.IO as Text
+import GHC.IO.Exception (ExitCode(..))
+import Crypto.Hash qualified as H
 
 data Settings = Settings
   { stateDirectory :: FilePath
   , timestamps :: Bool
   }
+
+type JobName = String
 
 getSettings :: IO Settings
 getSettings = do
@@ -38,6 +44,10 @@ getSettings = do
         { stateDirectory
         , timestamps
         }
+
+newtype AppState = AppState
+  { hashToSaveRef :: IORef (Maybe Text)
+  }
 
 main :: IO ()
 main = do
@@ -51,6 +61,7 @@ main = do
   let logFileName = settings.stateDirectory </> "logs" </> (jobName <> ".log")
 
   createDirectoryIfMissing True (settings.stateDirectory </> "locks")
+  createDirectoryIfMissing True (settings.stateDirectory </> "hash")
 
   withFileLock lockFileName Exclusive \_ -> do
     createDirectoryIfMissing True (settings.stateDirectory </> "logs")
@@ -72,7 +83,9 @@ main = do
 
     parentEnv <- getEnvironment
 
-    cmdHandler <- async $ commandHandler settings jobName requestPipeRead responsePipeWrite
+    appState <- AppState <$> newIORef Nothing
+
+    cmdHandler <- async $ commandHandler settings jobName appState requestPipeRead responsePipeWrite
 
     -- TODO: handle spawn error here
     -- TODO: should we use withCreateProcess?
@@ -91,6 +104,10 @@ main = do
     stderrHandler <- async $ outputStreamHandler settings (B8.pack jobName) logFile toplevelStderr "stderr" stderrPipe
 
     exitCode <- waitForProcess processHandle
+
+    when (exitCode == ExitSuccess) do
+      whenJustM (readIORef appState.hashToSaveRef) \hash ->
+        Text.writeFile (hashFilename settings jobName) (hash <> "\n")
 
     -- TODO: timeout here
     wait stdoutHandler
@@ -135,26 +152,75 @@ outputStreamHandler settings jobName logFile toplevelOutput streamName stream =
     -- We should probably just rely on atomicity of writes (and hope LineBuffering always works as expected)
     B8.hPutStrLn toplevelOutput $ timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
 
-commandHandler :: Settings -> String -> Handle -> Handle -> IO ()
-commandHandler settings jobName requestPipe responsePipe =
+commandHandler :: Settings -> JobName -> AppState -> Handle -> Handle -> IO ()
+commandHandler settings jobName appState requestPipe responsePipe =
   handle ignoreEOF $ forever do
     requestLine <- B8.hGetLine requestPipe
     case Aeson.eitherDecode @[String] (BL.fromStrict requestLine) of
       Left err -> do
         putStrLn @Text $ "Invalid command pipe request: " <> show requestLine <> "\nError: " <> show err
         B8.hPutStrLn responsePipe "exit 1"
-      Right cmd -> do
-        case SnapshotCliArgs.parse cmd of
+      Right ("snapshot":sargs) -> do
+        case SnapshotCliArgs.parse sargs of
           Left err -> do
             putStrLn @Text $ "snapshot: " <> toText err
             B8.hPutStrLn responsePipe "exit 1"
           Right args -> do
-            response <- snapshot args
+            response <- snapshot settings jobName appState args
+              `catch` (\(e :: SomeException) -> do
+                  putStrLn @Text $ "snapshot command failed with exception: " <> show e
+                  pure "exit 1")
             B8.hPutStrLn responsePipe (encodeUtf8 response)
+      Right cmd -> do
+        putStrLn @Text $ "Unknown command in command pipe: " <> show cmd
+        B8.hPutStrLn responsePipe "exit 1"
 
-snapshot :: SnapshotCliArgs -> IO String
-snapshot _args = do
-  pure "true"
+hasInputs :: SnapshotCliArgs -> Bool
+hasInputs args = not (null args.fileInputs) || not (null args.rawInputs) 
+
+snapshot :: Settings -> JobName -> AppState -> SnapshotCliArgs -> IO String
+snapshot settings jobName appState args = do
+  if hasInputs args then do
+    -- putStrLn @Text $ "Hash inputs: " <> show args.fileInputs
+
+    filesHash <-
+      if not (null args.fileInputs) then
+        hashFileInputs args.fileInputs
+      else
+        pure ""
+
+    let rawHash = 
+          if not (null args.rawInputs) then
+            hexSha1 (Text.intercalate "\n" (toText <$> args.rawInputs))
+          else
+            ""
+
+    let currentHash = filesHash <> rawHash
+
+    savedHash <- Text.strip . fromMaybe "none" <$> readFileIfExists (hashFilename settings jobName)
+
+    if currentHash /= savedHash then do
+      --putStrLn @Text $ "Hash mismatch, saved=" <>  savedHash <> ", current=" <>  currentHash
+      writeIORef appState.hashToSaveRef (Just currentHash)
+      pure "true"
+    else do
+      --putStrLn @Text $ "Hash matches, hash=" <> savedHash <> ", skipping"
+      pure "exit 0"
+
+  else do
+    pure "true"
+
+readFileIfExists :: FilePath -> IO (Maybe Text)
+readFileIfExists fp = do
+  exists <- doesFileExist fp
+  if exists then Just <$> Text.readFile fp else pure Nothing
+
+hashFilename :: Settings -> JobName -> String
+hashFilename settings jobName = settings.stateDirectory </> "hash" </> (jobName <> ".hash")
+
+hashFileInputs :: [FilePath] -> IO Text
+hashFileInputs inputs =
+  Text.strip . Text.pack <$> readProcess "bash" (["-c", $(embedStringFile "src/hash-files.sh"), "hash-files"] <> inputs) ""
 
 ignoreEOF :: IOError -> IO ()
 ignoreEOF e | isEOFError e = pure ()
@@ -166,3 +232,6 @@ instance Exception TaskrunnerError
 
 bail :: String -> IO a
 bail s = throwIO $ TaskrunnerError s
+                                                                                                                                           
+hexSha1 :: Text -> Text                                                                                                                  
+hexSha1 str = show (H.hash (encodeUtf8 str :: ByteString) :: H.Digest H.SHA1)

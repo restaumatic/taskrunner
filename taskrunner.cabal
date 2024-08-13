@@ -76,6 +76,7 @@ library
     , base >=4.7 && <5
     , bytestring
     , containers
+    , cryptonite
     , data-default
     , directory
     , file-embed
@@ -140,6 +141,7 @@ executable taskrunner
     , base >=4.7 && <5
     , bytestring
     , containers
+    , cryptonite
     , data-default
     , directory
     , file-embed
@@ -206,6 +208,7 @@ test-suite taskrunner-test
     , base >=4.7 && <5
     , bytestring
     , containers
+    , cryptonite
     , data-default
     , directory
     , file-embed

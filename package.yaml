@@ -38,6 +38,7 @@ dependencies:
 - Glob
 - file-embed
 - aeson
+- cryptonite
 
 default-extensions:
   - OverloadedStrings

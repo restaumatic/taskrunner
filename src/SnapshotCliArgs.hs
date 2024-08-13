@@ -7,7 +7,7 @@ data SnapshotCliArgs = SnapshotCliArgs
     { longRunning :: Bool
     , unskippable :: Bool
     , fileInputs :: [FilePath]
-    , cmdInputs :: [String]
+    , rawInputs :: [String]
     , outputs :: [FilePath]
     , postUnpackCommands :: [String]
     , fuzzyCache :: Bool
@@ -21,7 +21,7 @@ instance Default SnapshotCliArgs where
     { longRunning = False
     , unskippable = False
     , fileInputs = []
-    , cmdInputs = []
+    , rawInputs = []
     , outputs = []
     , postUnpackCommands = []
     , fuzzyCache = False
@@ -46,7 +46,7 @@ parse input = map fst $ flip execStateT (def :: SnapshotCliArgs, BeforeOutputs) 
     (_, phase) <- get
     case phase of
       BeforeOutputs ->
-        modifyArgs (\s -> s { cmdInputs = s.cmdInputs <> [arg] })
+        lift $ Left "--cmd is supported only after --outputs"
       AfterOutputs ->
         modifyArgs (\s -> s { postUnpackCommands = s.postUnpackCommands <> [arg] })
     go xs
@@ -58,6 +58,10 @@ parse input = map fst $ flip execStateT (def :: SnapshotCliArgs, BeforeOutputs) 
   -- `--unskippable` is an option, but I believe it doesn't do anything
   -- TODO: get rid of it
   go (opt:xs) | opt `elem` ["-n", "--unskippable"] = go xs
+
+  go ("--raw":arg:xs) = do
+    modifyArgs (\s -> s { rawInputs = s.rawInputs <> [arg] })
+    go xs
 
   go ("--fuzzy-cache":xs) = do
     modifyArgs (\s -> s { fuzzyCache = True })
@@ -76,7 +80,7 @@ parse input = map fst $ flip execStateT (def :: SnapshotCliArgs, BeforeOutputs) 
     go xs
 
   go (opt:_) | '-':_ <- opt =
-    lift $ Left $ "Invalid option: " <> opt
+    lift $ Left $ "Invalid option or missing argument: " <> opt
 
   go (path:xs) = do
     (_, phase) <- get

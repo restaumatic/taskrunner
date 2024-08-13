@@ -1,0 +1,3 @@
+-- output:
+[mytask] stdout | Expensive computation, input is: lol
+[mytask] stdout | Expensive computation, input is: I am changed now

@@ -1,0 +1,3 @@
+-- output:
+Unknown command in command pipe: ["random","command"]
+-- exit code: 1

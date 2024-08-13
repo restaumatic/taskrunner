@@ -52,6 +52,7 @@
 
 - less confusing output for cache miss (no "error")
 - ??? Something, can't recall now
+- `--cmd` replaced with `--raw`, since we can't really execute in the context of the original script
 
 ## Things to handle
 
@@ -61,3 +62,13 @@
   - pipe and pass fd to child process?
   - named pipe and pass name to child process via env?
 - Nested tasks - each should write to original stdout
+- Unmerged files when hashing
+- bad usage of `snapshot` - e.g. called twice
+- why `ls-tree -r` is needed - git option of quoting
+
+## Misc TODO
+
+- Better output of error messages (to normal streams)
+- String/Text unification
+- Debugging - show hash input
+- More specialized tests for input handling

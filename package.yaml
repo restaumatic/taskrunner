@@ -36,6 +36,8 @@ dependencies:
 - optparse-applicative
 - filelock
 - Glob
+- file-embed
+- aeson
 
 default-extensions:
   - OverloadedStrings

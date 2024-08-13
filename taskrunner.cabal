@@ -1,6 +1,6 @@
 cabal-version: 2.2
 
--- This file has been generated from package.yaml by hpack version 0.36.0.
+-- This file has been generated from package.yaml by hpack version 0.37.0.
 --
 -- see: https://github.com/sol/hpack
 
@@ -27,6 +27,7 @@ library
   exposed-modules:
       App
       CliArgs
+      SnapshotCliArgs
   other-modules:
       Paths_taskrunner
   autogen-modules:
@@ -70,12 +71,14 @@ library
   ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints
   build-depends:
       Glob
+    , aeson
     , async
     , base >=4.7 && <5
     , bytestring
     , containers
     , data-default
     , directory
+    , file-embed
     , filelock
     , filepath
     , optparse-applicative
@@ -132,12 +135,14 @@ executable taskrunner
   ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints -threaded
   build-depends:
       Glob
+    , aeson
     , async
     , base >=4.7 && <5
     , bytestring
     , containers
     , data-default
     , directory
+    , file-embed
     , filelock
     , filepath
     , optparse-applicative
@@ -196,12 +201,14 @@ test-suite taskrunner-test
   ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints -threaded
   build-depends:
       Glob
+    , aeson
     , async
     , base >=4.7 && <5
     , bytestring
     , containers
     , data-default
     , directory
+    , file-embed
     , filelock
     , filepath
     , optparse-applicative

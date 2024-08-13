@@ -1,0 +1,4 @@
+# Tests that we report a sensible error message when unable to parse command in cmd pipe
+echo junk >&${_taskrunner_request_pipe}
+read -u ${_taskrunner_response_pipe} reply
+eval "$reply"

@@ -1,22 +1,29 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module App where
 
 import Universum
 
 import System.Environment (setEnv, lookupEnv, getEnvironment)
-import System.Process (createProcess, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess)
+import System.Process (createProcess, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe)
 import System.IO (openBinaryFile, hSetBuffering, BufferMode (LineBuffering))
 import qualified System.FilePath as FilePath
 import System.FilePath ((</>))
 import System.Directory (createDirectoryIfMissing)
 import qualified Data.ByteString.Char8 as B8
-import Control.Concurrent.Async (async, wait)
+import Control.Concurrent.Async (async, wait, cancel)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import Control.Exception.Base (handle, throwIO)
-import System.IO.Error (isEOFError)
-import System.Posix.ByteString (stdOutput, fdToHandle)
+import System.IO.Error (isEOFError, IOError)
+import System.Posix.ByteString (stdOutput, fdToHandle, handleToFd)
 import System.Posix (Fd, dup, stdError)
 import CliArgs
 import System.FileLock (withFileLock, SharedExclusive (Exclusive))
+import Data.FileEmbed (embedStringFile)
+import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Lazy as BL
+import SnapshotCliArgs (SnapshotCliArgs)
+import SnapshotCliArgs qualified 
 
 data Settings = Settings
   { logDirectory :: FilePath
@@ -60,7 +67,15 @@ main = do
     toplevelStdout <- toplevelStream "_taskrunner_toplevel_stdout" stdOutput
     toplevelStderr <- toplevelStream "_taskrunner_toplevel_stderr" stdError
 
+    (requestPipeRead, requestPipeWrite) <- createPipe
+    requestPipeWriteFd <- handleToFd requestPipeWrite
+    (responsePipeRead, responsePipeWrite) <- createPipe
+    responsePipeReadFd <- handleToFd responsePipeRead
+    hSetBuffering responsePipeWrite LineBuffering
+
     parentEnv <- getEnvironment
+
+    cmdHandler <- async $ commandHandler settings jobName requestPipeRead responsePipeWrite
 
     -- TODO: handle spawn error here
     -- TODO: should we use withCreateProcess?
@@ -69,7 +84,9 @@ main = do
     (_, Just stdoutPipe, Just stderrPipe, processHandle) <- createProcess
       (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe, std_err = CreatePipe,
         env=Just $
-          [ ("BASH_FUNC_snapshot%%", "() { :;}")
+          [ ("BASH_FUNC_snapshot%%", "() {\n" <> $(embedStringFile "src/snapshot.sh") <> "\n}")
+          , ("_taskrunner_request_pipe", show requestPipeWriteFd)
+          , ("_taskrunner_response_pipe", show responsePipeReadFd)
           ] <> parentEnv
         }
 
@@ -81,6 +98,7 @@ main = do
     -- TODO: timeout here
     wait stdoutHandler
     wait stderrHandler
+    cancel cmdHandler
 
     exitWith exitCode
 
@@ -120,9 +138,30 @@ outputStreamHandler settings jobName logFile toplevelOutput streamName stream =
     -- We should probably just rely on atomicity of writes (and hope LineBuffering always works as expected)
     B8.hPutStrLn toplevelOutput $ timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
 
-  where
-    ignoreEOF e | isEOFError e = pure ()
-                | otherwise    = throwIO e
+commandHandler :: Settings -> String -> Handle -> Handle -> IO ()
+commandHandler settings jobName requestPipe responsePipe =
+  handle ignoreEOF $ forever do
+    requestLine <- B8.hGetLine requestPipe
+    case Aeson.eitherDecode @[String] (BL.fromStrict requestLine) of
+      Left err -> do
+        putStrLn @Text $ "Invalid command pipe request: " <> show requestLine <> "\nError: " <> show err
+        B8.hPutStrLn responsePipe "exit 1"
+      Right cmd -> do
+        case SnapshotCliArgs.parse cmd of
+          Left err -> do
+            putStrLn @Text $ "snapshot: " <> toText err
+            B8.hPutStrLn responsePipe "exit 1"
+          Right args -> do
+            response <- snapshot args
+            B8.hPutStrLn responsePipe (encodeUtf8 response)
+
+snapshot :: SnapshotCliArgs -> IO String
+snapshot _args = do
+  pure "true"
+
+ignoreEOF :: IOError -> IO ()
+ignoreEOF e | isEOFError e = pure ()
+            | otherwise    = throwIO e
 
 newtype TaskrunnerError = TaskrunnerError String deriving newtype (Show)
 

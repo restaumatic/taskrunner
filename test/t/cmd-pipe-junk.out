@@ -1,0 +1,4 @@
+-- output:
+Invalid command pipe request: "junk"
+Error: "Error in $: Failed reading: not a valid json value at 'junk'"
+-- exit code: 1

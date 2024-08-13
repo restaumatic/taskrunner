@@ -8,17 +8,22 @@ import System.Process (proc, createPipe, CreateProcess (..), StdStream (..), wit
 import System.IO
 import System.IO.Temp (withSystemTempDirectory)
 import System.Exit (ExitCode(..))
-import System.Environment (getEnv)
+import System.Environment (getEnv, lookupEnv)
 import System.FilePath.Glob as Glob
 import System.FilePath qualified as FP
 import Data.Default (Default(..))
+import Data.List (isInfixOf)
 
 main :: IO ()
 main = defaultMain =<< goldenTests
 
 goldenTests :: IO TestTree
 goldenTests = do
-  inputFiles <- findByExtension [".txt"] "test/t"
+  skipSlow <- (==Just "1") <$> lookupEnv "SKIP_SLOW_TESTS"
+  inputFiles0 <- findByExtension [".txt"] "test/t"
+  let inputFiles
+        | skipSlow = filter (\filename -> not ("/slow/" `isInfixOf` filename)) inputFiles0
+        | otherwise = inputFiles0
   return $ testGroup "tests"
     [ goldenVsString
         (takeBaseName inputFile) -- test name

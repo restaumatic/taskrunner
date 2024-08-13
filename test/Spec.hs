@@ -36,7 +36,6 @@ goldenTests = do
 runTest :: String -> IO LBS.ByteString
 runTest source = do
   withSystemTempDirectory "testrunner-test" \dir -> do
-    let logDir = dir </> "logs"
     let options = getOptions (toText source)
 
     (pipeRead, pipeWrite) <- createPipe
@@ -57,8 +56,7 @@ runTest source = do
     withCreateProcess
       initialProc { std_out = UseHandle pipeWrite, std_err = UseHandle pipeWrite
           , env = Just
-            [ ("TASKRUNNER_LOG_DIRECTORY", logDir)
-            , ("TASKRUNNER_LOCK_DIRECTORY", dir </> "locks")
+            [ ("TASKRUNNER_STATE_DIRECTORY", dir)
             , ("TASKRUNNER_DISABLE_TIMESTAMPS", "1")
             , ("PATH", path)
             ]

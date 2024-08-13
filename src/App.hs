@@ -26,19 +26,16 @@ import SnapshotCliArgs (SnapshotCliArgs)
 import SnapshotCliArgs qualified 
 
 data Settings = Settings
-  { logDirectory :: FilePath
-  , lockDirectory :: FilePath
+  { stateDirectory :: FilePath
   , timestamps :: Bool
   }
 
 getSettings :: IO Settings
 getSettings = do
-  logDirectory <- fromMaybe "/tmp/taskrunner/logs" <$> lookupEnv "TASKRUNNER_LOG_DIRECTORY"
-  lockDirectory <- fromMaybe "/tmp/taskrunner/locks" <$> lookupEnv "TASKRUNNER_LOCK_DIRECTORY"
+  stateDirectory <- fromMaybe "/tmp/taskrunner" <$> lookupEnv "TASKRUNNER_STATE_DIRECTORY"
   timestamps <- (/=Just "1") <$> lookupEnv "TASKRUNNER_DISABLE_TIMESTAMPS"
   pure Settings
-        { logDirectory
-        , lockDirectory
+        { stateDirectory
         , timestamps
         }
 
@@ -50,13 +47,13 @@ main = do
   -- TODO: better inference
   let jobName = fromMaybe (FilePath.takeFileName args.cmd) args.name
 
-  let lockFileName = settings.lockDirectory </> (jobName <> ".lock")
-  let logFileName = settings.logDirectory </> (jobName <> ".log")
+  let lockFileName = settings.stateDirectory </> "locks" </> (jobName <> ".lock")
+  let logFileName = settings.stateDirectory </> "logs" </> (jobName <> ".log")
 
-  createDirectoryIfMissing True settings.lockDirectory
+  createDirectoryIfMissing True (settings.stateDirectory </> "locks")
 
   withFileLock lockFileName Exclusive \_ -> do
-    createDirectoryIfMissing True settings.logDirectory
+    createDirectoryIfMissing True (settings.stateDirectory </> "logs")
 
     -- Lock (take) it while writing a line to either `logFile` or stdout
     logFile <- openBinaryFile logFileName WriteMode

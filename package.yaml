@@ -87,6 +87,7 @@ ghc-options:
 
 library:
   source-dirs: src
+  ghc-options: -O
 
 executables:
   taskrunner:
@@ -96,6 +97,7 @@ executables:
     # Note: -threaded is actually needed even if we don't need multicore, see https://hackage.haskell.org/package/process-1.6.20.0/docs/System-Process.html#v:waitForProcess
     # > GHC Note: in order to call waitForProcess without blocking all the other threads in the system, you must compile the program with -threaded.
     - -threaded
+    - -O
     dependencies:
     - taskrunner
 

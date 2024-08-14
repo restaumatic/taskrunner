@@ -1,0 +1,4 @@
+-- output:
+[toplevel] stderr | cp: cannot stat '.git/index': No such file or directory
+[toplevel] error | snapshot command failed with exception: readCreateProcess: bash "-c" "# Script called from main executable to compute hash of git pathspecs\n\nset -euo pipefail\n\nGIT_INDEX_FILE=\"$(mktemp)\"\ntrap 'rm -f \"${GIT_INDEX_FILE}\"' 0 1 2 3 15\nexport GIT_INDEX_FILE\ncp \"$(git rev-parse --git-dir)/index\" \"${GIT_INDEX_FILE}\"\ntree=\"$(git add \"$@\" && git write-tree)\" || exit 1\ngit ls-tree -r --full-name \"$tree\" \"$@\"\n" "hash-files" "nonexistent-file.txt" (exit 1): failed
+-- exit code: 1

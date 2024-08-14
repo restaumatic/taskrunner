@@ -1,0 +1,4 @@
+git init -q
+
+# TODO: the golden contains entire source of hash-files.sh, which is unfortunate, but hard to fix easily
+snapshot nonexistent-file.txt

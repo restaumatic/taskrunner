@@ -1,0 +1,5 @@
+# Test similar to `snapshot-invalid-option`, but the task is nested.
+# Tests (quite indirectly) that snapshot command goes to the correct command pipe (nested, not toplevel).
+taskrunner -n nested-task bash -e -c '
+  snapshot --junk-option
+'

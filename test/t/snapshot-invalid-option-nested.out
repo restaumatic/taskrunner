@@ -1,0 +1,3 @@
+-- output:
+[nested-task] error | snapshot: Invalid option or missing argument: --junk-option
+-- exit code: 1

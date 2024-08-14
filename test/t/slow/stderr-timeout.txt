@@ -1,0 +1,3 @@
+# Similar to `stdout-timeout`, but only stderr is held up.
+sleep 2 >/dev/null &
+disown

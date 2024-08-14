@@ -3,7 +3,7 @@ import Universum
 import Test.Tasty (defaultMain, TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString, findByExtension)
 import qualified Data.ByteString.Lazy as LBS
-import System.FilePath (takeBaseName, replaceExtension, (</>))
+import System.FilePath (takeBaseName, replaceExtension)
 import System.Process (proc, createPipe, CreateProcess (..), StdStream (..), withCreateProcess, waitForProcess)
 import System.IO
 import System.IO.Temp (withSystemTempDirectory)
@@ -58,6 +58,7 @@ runTest source = do
           , env = Just
             [ ("TASKRUNNER_STATE_DIRECTORY", dir)
             , ("TASKRUNNER_DISABLE_TIMESTAMPS", "1")
+            , ("TASKRUNNER_OUTPUT_STREAM_TIMEOUT", "1")
             , ("PATH", path)
             ]
           , cwd = Just dir

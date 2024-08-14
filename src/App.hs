@@ -30,11 +30,14 @@ import GHC.IO.Exception (ExitCode(..))
 import Crypto.Hash qualified as H
 import Data.Containers.ListUtils (nubOrdOn)
 import GHC.IO.Handle (hDuplicate)
+import System.Timeout (timeout)
+import Prelude (read)
 
 data Settings = Settings
   { stateDirectory :: FilePath
   , timestamps :: Bool
   , debug :: Bool
+  , outputStreamTimeout :: Int
   } deriving (Show)
 
 type JobName = String
@@ -44,10 +47,12 @@ getSettings = do
   stateDirectory <- fromMaybe "/tmp/taskrunner" <$> lookupEnv "TASKRUNNER_STATE_DIRECTORY"
   timestamps <- (/=Just "1") <$> lookupEnv "TASKRUNNER_DISABLE_TIMESTAMPS"
   debug <- (==Just "1") <$> lookupEnv "TASKRUNNER_DEBUG"
+  outputStreamTimeout <- maybe 5 read <$> lookupEnv "TASKRUNNER_OUTPUT_STREAM_TIMEOUT"
   pure Settings
         { stateDirectory
         , timestamps
         , debug
+        , outputStreamTimeout
         }
 
 data AppState = AppState
@@ -119,16 +124,19 @@ main = do
 
     exitCode <- waitForProcess processHandle
 
+    logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
+
     when (exitCode == ExitSuccess) do
-      whenJustM (readIORef appState.hashToSaveRef) \hash ->
+      whenJustM (readIORef appState.hashToSaveRef) \hash -> do
+        logDebug appState $ "Saving hash " <> Text.takeWhile (/= '\n') hash <> " to " <> toText (hashFilename appState)
         Text.writeFile (hashFilename appState) (hash <> "\n")
 
-    -- TODO: timeout here
-    wait stdoutHandler
+    timeoutStream appState "stdout" $ wait stdoutHandler
 
     -- We used `createProcess_`, so we must close it manually
     hClose appState.subprocessStderr
-    wait stderrHandler
+    timeoutStream appState "stderr" $ wait stderrHandler
+
     cancel cmdHandler
 
     exitWith exitCode
@@ -151,6 +159,15 @@ toplevelStream envName fd = do
   h <- fdToHandle newFd
   hSetBuffering h LineBuffering
   pure h
+
+timeoutStream :: AppState -> Text -> IO () -> IO ()
+timeoutStream appState streamName action = do
+  result <- timeout (appState.settings.outputStreamTimeout * 1000000) action
+  when (isNothing result) do
+    logError appState $ "Task did not close " <> streamName <> " " <> show appState.settings.outputStreamTimeout <> " seconds after exiting."
+    logError appState "Perhaps there's a background process?"
+
+    exitFailure
 
 outputStreamHandler :: AppState -> Handle -> ByteString -> Handle -> IO ()
 outputStreamHandler appState toplevelOutput streamName stream = do
@@ -269,6 +286,7 @@ newtype TaskrunnerError = TaskrunnerError String deriving newtype (Show)
 
 instance Exception TaskrunnerError
 
+-- TODO: get rid of this
 bail :: String -> IO a
 bail s = throwIO $ TaskrunnerError s
 

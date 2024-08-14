@@ -1,0 +1,3 @@
+# By spawning a background process, we add to refcount of the pipe.
+sleep 2 &
+disown

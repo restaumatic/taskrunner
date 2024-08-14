@@ -9,7 +9,7 @@ import System.Process (createProcess_, CreateProcess (..), StdStream (CreatePipe
 import System.IO (openBinaryFile, hSetBuffering, BufferMode (LineBuffering) )
 import qualified System.FilePath as FilePath
 import System.FilePath ((</>))
-import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory)
 import qualified Data.ByteString.Char8 as B8
 import Control.Concurrent.Async (async, wait, cancel)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
@@ -103,8 +103,11 @@ main = do
 
     cmdHandler <- async $ commandHandler appState requestPipeRead responsePipeWrite
 
+    cwd <- getCurrentDirectory
+
     logDebug appState $ "Running command: " <> show (args.cmd : args.args)
-    logDebug appState $ "Settings: " <> show settings
+    logDebug appState $ "  cwd: " <> show cwd
+    logDebug appState $ "  settings: " <> show settings
 
     -- TODO: handle spawn error here
     -- TODO: should we use withCreateProcess?

@@ -1,0 +1,6 @@
+# Regression test: in early versions we opened `/dev/null` for stdin in write mode (should be read).
+# Discovered via Spring (of Ruby on Rails) throwing and exception and hanging.
+# With bug present, outputs additional error message:
+# [toplevel] stderr | bash: line 1: read: read error: 0: Bad file descriptor
+# Without bug, the read still fails (EOF), but there's no extra error message.
+read foo || echo "Nothing there"

@@ -85,7 +85,7 @@ main = do
     logFile <- openBinaryFile logFileName WriteMode
     hSetBuffering logFile LineBuffering
 
-    devnull <- openBinaryFile "/dev/null" WriteMode
+    devnull <- openBinaryFile "/dev/null" ReadMode
 
     toplevelStdout <- toplevelStream "_taskrunner_toplevel_stdout" stdOutput
     toplevelStderr <- toplevelStream "_taskrunner_toplevel_stderr" stdError

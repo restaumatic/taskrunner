@@ -153,7 +153,8 @@ maybeWithBucket Options{s3=True} block = do
           when (listResponse.isTruncated == Just True) do
             error "TODO: unhandled truncated ListObjects response when deleting test bucket"
           let objects = maybe [] (map (newObjectIdentifier . (.key))) listResponse.contents
-          _ <- AWS.send env $ newDeleteObjects bucket newDelete { objects }
+          unless (null objects) do
+            void $ AWS.send env $ newDeleteObjects bucket newDelete { objects }
           AWS.send env $ newDeleteBucket bucket
 
   bracket_ createBucket deleteBucket $

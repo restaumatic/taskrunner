@@ -84,6 +84,7 @@ library
     , bytestring
     , conduit
     , conduit-combinators
+    , conduit-extra
     , conduit-zstd
     , containers
     , cryptonite
@@ -163,6 +164,7 @@ executable taskrunner
     , bytestring
     , conduit
     , conduit-combinators
+    , conduit-extra
     , conduit-zstd
     , containers
     , cryptonite
@@ -244,6 +246,7 @@ test-suite taskrunner-test
     , bytestring
     , conduit
     , conduit-combinators
+    , conduit-extra
     , conduit-zstd
     , containers
     , cryptonite

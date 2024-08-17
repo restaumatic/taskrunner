@@ -50,6 +50,7 @@ dependencies:
 - tar-conduit
 - conduit
 - conduit-combinators
+- conduit-extra
 - network-uri
 - random
 - lens

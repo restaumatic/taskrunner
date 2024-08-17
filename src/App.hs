@@ -34,6 +34,7 @@ import Prelude (read)
 import Types
 import Utils
 import qualified RemoteCache
+import RemoteCache (getLatestBuildHash)
 
 getSettings :: IO Settings
 getSettings = do
@@ -128,6 +129,10 @@ main = do
             logDebug appState "Saving remote cache"
             s <- RemoteCache.getRemoteCacheSettingsFromEnv
             RemoteCache.saveCache appState s (fromMaybe "." snapshotArgs.cacheRoot) snapshotArgs.outputs (archiveName appState snapshotArgs h.hash)
+
+            when snapshotArgs.fuzzyCache do
+              branch <- getCurrentBranch appState
+              RemoteCache.setLatestBuildHash appState s (toText appState.jobName) branch h.hash
 
     timeoutStream appState "stdout" $ wait stdoutHandler
 
@@ -247,6 +252,25 @@ snapshot appState args = do
       else do
         logDebug appState "Neither local nor remote cache found, running task"
         writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
+
+        when (hasOutputs args && args.fuzzyCache) do
+          s <- RemoteCache.getRemoteCacheSettingsFromEnv
+          let
+            go [] = pure ()
+            go (branch:xs) = do
+              m_latestHash <- getLatestBuildHash appState s (toText appState.jobName) branch
+              case m_latestHash of
+                Nothing ->
+                  go xs
+                Just hash -> do
+                  success <- RemoteCache.restoreCache appState s (fromMaybe "." args.cacheRoot) (archiveName appState args hash)
+                  if success then
+                    logDebug appState $ "Restored fuzzy cache from branch " <> branch <> ", hash=" <> hash
+                  else
+                    go xs
+
+          getBranchesToTry appState >>= go
+
         pure "true"
     else do
       logDebug appState $ "Hash matches, hash=" <> savedHash <> ", skipping"
@@ -254,6 +278,20 @@ snapshot appState args = do
 
   else do
     pure "true"
+
+getBranchesToTry :: AppState -> IO [Text]
+getBranchesToTry appState = do
+  currentBranch <- getCurrentBranch appState
+
+  -- TODO: add fallback branches from config
+  pure [currentBranch]
+
+getCurrentBranch :: AppState -> IO Text
+getCurrentBranch appState =
+  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
+    Text.strip . Text.pack <$> readCreateProcess
+      (proc "git" ["symbolic-ref", "--short", "HEAD"]) { std_err = UseHandle stderr_ }
+       ""
 
 readFileIfExists :: FilePath -> IO (Maybe Text)
 readFileIfExists fp = do

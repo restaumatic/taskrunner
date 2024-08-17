@@ -20,7 +20,7 @@ import System.Environment (lookupEnv)
 import Amazonka.Types ( Region(..), AccessKey(..), SecretKey(..), Service, s3AddressingStyle, S3AddressingStyle(..) )
 import Types
 import System.Process (CreateProcess(..), cleanupProcess, createProcess_, StdStream (..), proc, waitForProcess)
-import Conduit (sourceHandle, sinkHandle)
+import Conduit (sourceHandle, sinkHandle, foldMapC)
 import Network.URI (parseURI, URI (..), URIAuth(..))
 import System.Directory (makeAbsolute)
 import System.FilePath (makeRelative)
@@ -29,6 +29,12 @@ import Utils (bail, logDebug)
 import qualified Amazonka as AWS
 import Control.Exception.Lens (handling)
 import System.Exit (ExitCode(..))
+import qualified Data.Conduit as C
+import qualified Data.Conduit.Text as CT
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Builder as TLB
+import Amazonka.S3.PutObject (newPutObject)
+
 
 packTar :: MonadResource m => AppState -> FilePath -> [FilePath] -> ConduitT () BS.ByteString m ()
 packTar appState workdir files = do
@@ -88,7 +94,7 @@ getRemoteCacheSettingsFromEnv = do
   awsAccessKey <- maybe (error "TASKRUNNER_AWS_ACCESS_KEY not provided") toText <$> lookupEnv "TASKRUNNER_AWS_ACCESS_KEY"
   awsSecretKey <- maybe (error "TASKRUNNER_AWS_SECRET_KEY not provided") toText <$> lookupEnv "TASKRUNNER_AWS_SECRET_KEY"
   remoteCacheBucket <- maybe (error "TASKRUNNER_REMOTE_CACHE_BUCKET not provided") toText <$> lookupEnv "TASKRUNNER_REMOTE_CACHE_BUCKET"
-  remoteCachePrefix <- maybe "taskrunner-cache/" toText <$> lookupEnv "TASKRUNNER_REMOTE_CACHE_PREFIX"
+  remoteCachePrefix <- maybe "taskrunner/" toText <$> lookupEnv "TASKRUNNER_REMOTE_CACHE_PREFIX"
   pure RemoteCacheSettings{..}
 
 parseEndpoint :: Text -> Maybe (Service -> Service)
@@ -117,7 +123,7 @@ saveCache appState settings relativeCacheRoot files archiveName = do
     env <- newAwsEnv appState settings
 
     let bucket = settings.remoteCacheBucket
-    let objectKey = settings.remoteCachePrefix <> archiveName
+    let objectKey = settings.remoteCachePrefix <> "bundles/" <> archiveName
 
     cacheRoot <- makeAbsolute relativeCacheRoot
 
@@ -153,7 +159,7 @@ restoreCache
 restoreCache appState settings cacheRoot archiveName = do
   env <- newAwsEnv appState settings
   let bucket = settings.remoteCacheBucket
-  let objectKey = settings.remoteCachePrefix <> archiveName
+  let objectKey = settings.remoteCachePrefix <> "bundles/" <> archiveName
 
   logDebug appState $ "Downloading from s3://" <> bucket <> "/" <> objectKey
 
@@ -168,6 +174,50 @@ restoreCache appState settings cacheRoot archiveName = do
     --      .| Zstd.decompress
           .| unpackTar appState cacheRoot
     pure True
+
+getLatestBuildHash
+  :: AppState
+  -> RemoteCacheSettings
+  -> Text -- ^ Job name
+  -> Text -- ^ branch
+  -> IO (Maybe Text)
+getLatestBuildHash appState settings jobName branch = do
+  env <- newAwsEnv appState settings
+  let bucket = settings.remoteCacheBucket
+  let objectKey = settings.remoteCachePrefix <> "latest/" <> jobName <> "-" <> branch <> ".txt"
+
+  logDebug appState $ "Downloading latest hash from s3://" <> bucket <> "/" <> objectKey
+
+  let
+    onNoSuchKey _ = do
+      logDebug appState $ "Latest hash key not found s3://" <> bucket <> "/" <> objectKey
+      pure Nothing
+
+  handling _NoSuchKey onNoSuchKey $ runConduitRes do
+    response <- AWS.send env $ newGetObject (BucketName bucket) (ObjectKey objectKey)
+    response.body.body .| Just <$> readByteStringConduitAsText
+
+readByteStringConduitAsText :: MonadThrow m => C.ConduitT BS.ByteString Void m Text
+readByteStringConduitAsText = do
+    -- Decode ByteString to Text, then fold the chunks into a Builder, and finally convert to strict Text
+    TL.toStrict . TLB.toLazyText <$> (CT.decodeUtf8 .| foldMapC TLB.fromText)
+
+setLatestBuildHash
+  :: AppState
+  -> RemoteCacheSettings
+  -> Text -- ^ Job name
+  -> Text -- ^ Branch
+  -> Text -- ^ Hash to store
+  -> IO ()
+setLatestBuildHash appState settings jobName branch hash = do
+  env <- newAwsEnv appState settings
+  let bucket = settings.remoteCacheBucket
+  let objectKey = settings.remoteCachePrefix <> "latest/" <> jobName <> "-" <> branch <> ".txt"
+
+  logDebug appState $ "Uploading latest hash " <> hash <> " to s3://" <> bucket <> "/" <> objectKey
+
+  runConduitRes do
+    void $ AWS.send env $ newPutObject (BucketName bucket) (ObjectKey objectKey) (AWS.toBody hash)
 
 newAwsEnv :: AppState -> RemoteCacheSettings -> IO AWS.Env
 newAwsEnv appState settings = do

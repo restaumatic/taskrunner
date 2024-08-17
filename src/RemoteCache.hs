@@ -53,7 +53,7 @@ packTar appState workdir files = do
 unpackTar :: MonadResource m => AppState -> FilePath -> ConduitT BS.ByteString Void m ()
 unpackTar appState workdir = do
   let cmd = "tar"
-  let args = ["-x"]
+  let args = ["-x", "--zstd"]
   liftIO $ logDebug appState $ "Running subprocess: " <> show (cmd:args) <> " in cwd " <> show workdir
   bracketP ( createProcess_ "createProcess_"
     (proc cmd args)
@@ -64,6 +64,7 @@ unpackTar appState workdir = do
      ) cleanupProcess \case
        (Just stdinPipe, _, _, process) -> do
          sinkHandle stdinPipe
+         hClose stdinPipe
          exitCode <- liftIO $ waitForProcess process
          when (exitCode /= ExitSuccess) do
            liftIO $ bail $ "tar unpack command failed with code: " <> show exitCode
@@ -91,12 +92,14 @@ getRemoteCacheSettingsFromEnv = do
   pure RemoteCacheSettings{..}
 
 parseEndpoint :: Text -> Maybe (Service -> Service)
+parseEndpoint "default-aws" = Just id
 parseEndpoint s = do
   uri <- parseURI (toString s)
   authority <- uri.uriAuthority
   ':':portStr <- pure authority.uriPort
   port <- readMaybe portStr
   pure $ setEndpoint (uri.uriScheme == "https") (encodeUtf8 authority.uriRegName) port
+    . (\svc -> svc { s3AddressingStyle = S3AddressingStylePath })
 
 -- TODO:
 -- - report speed, size etc.
@@ -132,7 +135,7 @@ saveCache appState settings relativeCacheRoot files archiveName = do
         let multipartUpload = newCreateMultipartUpload (BucketName bucket) (ObjectKey objectKey)
         result <-
           packTar appState cacheRoot filesRelativeToCacheRoot
-          .| Zstd.compress 9
+          .| Zstd.compress 3
           .| streamUpload env Nothing multipartUpload
         case result of
           Left (_, err) ->
@@ -162,10 +165,9 @@ restoreCache appState settings cacheRoot archiveName = do
   handling _NoSuchKey onNoSuchKey $ runConduitRes do
     response <- AWS.send env $ newGetObject (BucketName bucket) (ObjectKey objectKey)
     response.body.body
-          .| Zstd.decompress
+    --      .| Zstd.decompress
           .| unpackTar appState cacheRoot
     pure True
-
 
 newAwsEnv :: AppState -> RemoteCacheSettings -> IO AWS.Env
 newAwsEnv appState settings = do
@@ -176,4 +178,4 @@ newAwsEnv appState settings = do
             { region = Region' settings.awsRegion
             , logger = logger
             })
-        . overrideService (endpointFn . (\svc -> svc { s3AddressingStyle = S3AddressingStylePath }))
+        . overrideService endpointFn

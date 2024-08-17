@@ -30,7 +30,7 @@ main = defaultMain =<< goldenTests
 goldenTests :: IO TestTree
 goldenTests = do
   skipSlow <- (==Just "1") <$> lookupEnv "SKIP_SLOW_TESTS"
-  inputFiles0 <- findByExtension [".txt"] "test/t"
+  inputFiles0 <- sort <$> findByExtension [".txt"] "test/t"
   let inputFiles
         | skipSlow = filter (\filename -> not ("/slow/" `isInfixOf` filename)) inputFiles0
         | otherwise = inputFiles0

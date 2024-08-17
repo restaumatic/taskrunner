@@ -27,7 +27,10 @@ library
   exposed-modules:
       App
       CliArgs
+      RemoteCache
       SnapshotCliArgs
+      Types
+      Utils
   other-modules:
       Paths_taskrunner
   autogen-modules:
@@ -72,9 +75,16 @@ library
   build-depends:
       Glob
     , aeson
+    , amazonka
+    , amazonka-core
+    , amazonka-s3
+    , amazonka-s3-streaming
     , async
     , base >=4.7 && <5
     , bytestring
+    , conduit
+    , conduit-combinators
+    , conduit-zstd
     , containers
     , cryptonite
     , data-default
@@ -82,13 +92,20 @@ library
     , file-embed
     , filelock
     , filepath
+    , lens
+    , network-uri
     , optparse-applicative
     , process
+    , random
+    , resourcet
+    , tar
+    , tar-conduit
     , temporary
     , text
     , time
     , universum
     , unix
+    , zstd
   default-language: Haskell2010
 
 executable taskrunner
@@ -137,9 +154,16 @@ executable taskrunner
   build-depends:
       Glob
     , aeson
+    , amazonka
+    , amazonka-core
+    , amazonka-s3
+    , amazonka-s3-streaming
     , async
     , base >=4.7 && <5
     , bytestring
+    , conduit
+    , conduit-combinators
+    , conduit-zstd
     , containers
     , cryptonite
     , data-default
@@ -147,14 +171,21 @@ executable taskrunner
     , file-embed
     , filelock
     , filepath
+    , lens
+    , network-uri
     , optparse-applicative
     , process
+    , random
+    , resourcet
+    , tar
+    , tar-conduit
     , taskrunner
     , temporary
     , text
     , time
     , universum
     , unix
+    , zstd
   default-language: Haskell2010
 
 test-suite taskrunner-test
@@ -204,9 +235,16 @@ test-suite taskrunner-test
   build-depends:
       Glob
     , aeson
+    , amazonka
+    , amazonka-core
+    , amazonka-s3
+    , amazonka-s3-streaming
     , async
     , base >=4.7 && <5
     , bytestring
+    , conduit
+    , conduit-combinators
+    , conduit-zstd
     , containers
     , cryptonite
     , data-default
@@ -214,8 +252,14 @@ test-suite taskrunner-test
     , file-embed
     , filelock
     , filepath
+    , lens
+    , network-uri
     , optparse-applicative
     , process
+    , random
+    , resourcet
+    , tar
+    , tar-conduit
     , taskrunner
     , tasty
     , tasty-golden
@@ -224,4 +268,5 @@ test-suite taskrunner-test
     , time
     , universum
     , unix
+    , zstd
   default-language: Haskell2010

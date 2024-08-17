@@ -12,7 +12,7 @@ data SnapshotCliArgs = SnapshotCliArgs
     , postUnpackCommands :: [String]
     , fuzzyCache :: Bool
     , cacheRoot :: Maybe FilePath
-    , cacheVersion :: Maybe String
+    , cacheVersion :: Maybe Text
     , commitStatus :: Bool
     } deriving (Show)
 
@@ -72,7 +72,7 @@ parse input = map fst $ flip execStateT (def :: SnapshotCliArgs, BeforeOutputs) 
     go xs
 
   go ("--cache-version":arg:xs) = do
-    modifyArgs (\s -> s { cacheVersion = Just arg })
+    modifyArgs (\s -> s { cacheVersion = Just $ toText arg })
     go xs
 
   go ("--commit-status":xs) = do

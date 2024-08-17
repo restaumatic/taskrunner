@@ -12,7 +12,6 @@ import System.FilePath ((</>))
 import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory)
 import qualified Data.ByteString.Char8 as B8
 import Control.Concurrent.Async (async, wait, cancel)
-import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import Control.Exception.Base (handle, throwIO)
 import System.IO.Error (isEOFError, IOError)
 import System.Posix.ByteString (stdOutput, fdToHandle, handleToFd)
@@ -32,37 +31,27 @@ import Data.Containers.ListUtils (nubOrdOn)
 import GHC.IO.Handle (hDuplicate)
 import System.Timeout (timeout)
 import Prelude (read)
-
-data Settings = Settings
-  { stateDirectory :: FilePath
-  , timestamps :: Bool
-  , debug :: Bool
-  , outputStreamTimeout :: Int
-  } deriving (Show)
-
-type JobName = String
+import Types
+import Utils
+import qualified RemoteCache
 
 getSettings :: IO Settings
 getSettings = do
   stateDirectory <- fromMaybe "/tmp/taskrunner" <$> lookupEnv "TASKRUNNER_STATE_DIRECTORY"
+  cwd <- getCurrentDirectory
+  rootDirectory <- fromMaybe cwd <$> lookupEnv "TASKRUNNER_ROOT_DIRECTORY"
   timestamps <- (/=Just "1") <$> lookupEnv "TASKRUNNER_DISABLE_TIMESTAMPS"
   debug <- (==Just "1") <$> lookupEnv "TASKRUNNER_DEBUG"
   outputStreamTimeout <- maybe 5 read <$> lookupEnv "TASKRUNNER_OUTPUT_STREAM_TIMEOUT"
+  saveRemoteCache <- (==Just "1") <$> lookupEnv "TASKRUNNER_SAVE_REMOTE_CACHE"
   pure Settings
         { stateDirectory
+        , rootDirectory
         , timestamps
         , debug
         , outputStreamTimeout
+        , saveRemoteCache
         }
-
-data AppState = AppState
-  { settings :: Settings
-  , jobName :: JobName
-  , hashToSaveRef :: IORef (Maybe Text)
-  , toplevelStderr :: Handle
-  , subprocessStderr :: Handle
-  , logOutput :: Handle
-  }
 
 main :: IO ()
 main = do
@@ -99,7 +88,7 @@ main = do
     parentEnv <- getEnvironment
     (stderrPipe, subprocessStderr) <- createPipe
 
-    appState <- AppState settings jobName <$> newIORef Nothing <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
+    appState <- AppState settings jobName <$> newIORef Nothing <*> newIORef Nothing <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
 
     cmdHandler <- async $ commandHandler appState requestPipeRead responsePipeWrite
 
@@ -130,9 +119,15 @@ main = do
     logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
 
     when (exitCode == ExitSuccess) do
-      whenJustM (readIORef appState.hashToSaveRef) \hash -> do
-        logDebug appState $ "Saving hash " <> Text.takeWhile (/= '\n') hash <> " to " <> toText (hashFilename appState)
-        Text.writeFile (hashFilename appState) (hash <> "\n")
+      whenJustM (readIORef appState.hashToSaveRef) \h -> do
+        logDebug appState $ "Saving hash " <> h.hash <> " to " <> toText (hashFilename appState)
+        Text.writeFile (hashFilename appState) (h.hash <> "\n\n" <> h.hashInput)
+
+        whenJustM (readIORef appState.snapshotArgsRef) \snapshotArgs ->
+          when (hasOutputs snapshotArgs && settings.saveRemoteCache) do
+            logDebug appState "Saving remote cache"
+            s <- RemoteCache.getRemoteCacheSettingsFromEnv
+            RemoteCache.saveCache appState s (fromMaybe "." snapshotArgs.cacheRoot) snapshotArgs.outputs (archiveName appState snapshotArgs h.hash)
 
     timeoutStream appState "stdout" $ wait stdoutHandler
 
@@ -143,6 +138,9 @@ main = do
     cancel cmdHandler
 
     exitWith exitCode
+
+archiveName :: AppState -> SnapshotCliArgs -> Text -> Text
+archiveName appState snapshotArgs hash = toText appState.jobName <> maybe "" ("-"<>) snapshotArgs.cacheVersion <> "-" <> hash <> ".tar.zst"
 
 toplevelStream :: String -> Fd -> IO Handle
 toplevelStream envName fd = do
@@ -178,32 +176,6 @@ outputStreamHandler appState toplevelOutput streamName stream = do
     line <- B8.hGetLine stream
     outputLine appState toplevelOutput streamName line
 
-outputLine :: AppState -> Handle -> ByteString -> ByteString -> IO ()
-outputLine appState toplevelOutput streamName line = do
-    let jobName = B8.pack appState.jobName
-    timestamp <- getCurrentTime
-    let timestampStr
-          | appState.settings.timestamps =
-              -- TODO: add milliseconds somehow
-              B8.pack (formatTime defaultTimeLocale "%T" timestamp) <> " "
-          | otherwise = ""
-
-    B8.hPutStrLn appState.logOutput $ timestampStr <> streamName <> " | " <> line
-
-    -- FIXME: since toplevelOutput is shared between multiple processes, the mutex makes little sense...
-    -- We should probably just rely on atomicity of writes (and hope LineBuffering always works as expected)
-    B8.hPutStrLn toplevelOutput $ timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
-
-logLevel :: ByteString -> AppState -> Text -> IO ()
-logLevel level appState msg =
-  forM_ (lines msg) $ outputLine appState appState.toplevelStderr level . encodeUtf8
-
-logDebug :: AppState -> Text -> IO ()
-logDebug appState msg = when appState.settings.debug $ logLevel "debug" appState msg
-
-logError :: AppState -> Text -> IO ()
-logError = logLevel "error"
-
 commandHandler :: AppState -> Handle -> Handle -> IO ()
 commandHandler appState requestPipe responsePipe =
   handle ignoreEOF $ forever do
@@ -235,8 +207,14 @@ commandHandler appState requestPipe responsePipe =
 hasInputs :: SnapshotCliArgs -> Bool
 hasInputs args = not (null args.fileInputs) || not (null args.rawInputs)
 
+hasOutputs :: SnapshotCliArgs -> Bool
+hasOutputs args = not (null args.outputs)
+
 snapshot :: AppState -> SnapshotCliArgs -> IO String
 snapshot appState args = do
+  -- TODO: check for duplicate
+  writeIORef appState.snapshotArgsRef (Just args)
+
   if hasInputs args then do
     logDebug appState $ "Files to hash: " <> show args.fileInputs
     logDebug appState $ "Raw inputs: " <> show args.rawInputs
@@ -256,8 +234,20 @@ snapshot appState args = do
 
     if currentHash /= savedHash then do
       logDebug appState $ "Hash mismatch, saved=" <>  savedHash <> ", current=" <>  currentHash
-      writeIORef appState.hashToSaveRef $ Just $ currentHash <> "\n\n" <> currentHashInput
-      pure "true"
+      fromRemote <-
+        if hasOutputs args then do
+          s <- RemoteCache.getRemoteCacheSettingsFromEnv
+          RemoteCache.restoreCache appState s (fromMaybe "." args.cacheRoot) (archiveName appState args currentHash)
+        else
+          pure False
+
+      if fromRemote then do
+        logDebug appState "Remote cache found, skipping"
+        pure "exit 0"
+      else do
+        logDebug appState "Neither local nor remote cache found, running task"
+        writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
+        pure "true"
     else do
       logDebug appState $ "Hash matches, hash=" <> savedHash <> ", skipping"
       pure "exit 0"
@@ -284,14 +274,6 @@ hashFileInputs appState inputs =
 ignoreEOF :: IOError -> IO ()
 ignoreEOF e | isEOFError e = pure ()
             | otherwise    = throwIO e
-
-newtype TaskrunnerError = TaskrunnerError String deriving newtype (Show)
-
-instance Exception TaskrunnerError
-
--- TODO: get rid of this
-bail :: String -> IO a
-bail s = throwIO $ TaskrunnerError s
 
 hexSha1 :: Text -> Text
 hexSha1 str = show (H.hash (encodeUtf8 str :: ByteString) :: H.Digest H.SHA1)

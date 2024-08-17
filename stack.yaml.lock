@@ -3,7 +3,14 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    hackage: amazonka-s3-streaming-2.0.0.0@sha256:7ab2ce919a0ace84aa0b9727a5e5aea17893831fcf7e82b77677fb0390b8ae2d,3086
+    pantry-tree:
+      sha256: 6fb3b79453c568ee95fb09c6394f47c6fbb0e4156fd1c3db1de53905470f2254
+      size: 389
+  original:
+    hackage: amazonka-s3-streaming-2.0.0.0@sha256:7ab2ce919a0ace84aa0b9727a5e5aea17893831fcf7e82b77677fb0390b8ae2d,3086
 snapshots:
 - completed:
     sha256: 2fdd7d3e54540062ef75ca0a73ca3a804c527dbf8a4cadafabf340e66ac4af40

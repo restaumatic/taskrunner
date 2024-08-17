@@ -39,6 +39,20 @@ dependencies:
 - file-embed
 - aeson
 - cryptonite
+- resourcet
+- amazonka
+- amazonka-core
+- amazonka-s3
+- amazonka-s3-streaming
+- zstd
+- conduit-zstd
+- tar
+- tar-conduit
+- conduit
+- conduit-combinators
+- network-uri
+- random
+- lens
 
 default-extensions:
   - OverloadedStrings

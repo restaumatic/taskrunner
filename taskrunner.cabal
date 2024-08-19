@@ -27,6 +27,7 @@ library
   exposed-modules:
       App
       CliArgs
+      CommitStatus
       RemoteCache
       SnapshotCliArgs
       Types
@@ -93,6 +94,10 @@ library
     , file-embed
     , filelock
     , filepath
+    , http-client
+    , http-client-tls
+    , http-types
+    , jwt
     , lens
     , network-uri
     , optparse-applicative
@@ -173,6 +178,10 @@ executable taskrunner
     , file-embed
     , filelock
     , filepath
+    , http-client
+    , http-client-tls
+    , http-types
+    , jwt
     , lens
     , network-uri
     , optparse-applicative
@@ -255,6 +264,10 @@ test-suite taskrunner-test
     , file-embed
     , filelock
     , filepath
+    , http-client
+    , http-client-tls
+    , http-types
+    , jwt
     , lens
     , network-uri
     , optparse-applicative

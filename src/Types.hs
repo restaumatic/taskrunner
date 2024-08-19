@@ -10,6 +10,7 @@ data Settings = Settings
   , debug :: Bool
   , outputStreamTimeout :: Int
   , saveRemoteCache :: Bool
+  , enableCommitStatus :: Bool
   } deriving (Show)
 
 type JobName = String

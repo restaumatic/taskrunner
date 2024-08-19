@@ -54,6 +54,10 @@ dependencies:
 - network-uri
 - random
 - lens
+- jwt
+- http-client
+- http-client-tls
+- http-types
 
 default-extensions:
   - OverloadedStrings

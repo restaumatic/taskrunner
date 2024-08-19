@@ -9,6 +9,10 @@ import Control.Exception (throwIO)
 import Text.Printf (printf)
 import Prelude (until)
 import Data.List ((!!))
+import System.Process (CreateProcess(..), StdStream (..), readCreateProcess)
+import Data.Conduit.Process (proc)
+import qualified Data.Text as Text
+import GHC.IO.Handle (hDuplicate)
 
 outputLine :: AppState -> Handle -> ByteString -> ByteString -> IO ()
 outputLine appState toplevelOutput streamName line = do
@@ -59,3 +63,17 @@ bytesfmt formatter bs = printf (formatter <> " %s")
   bytesSuffixes :: [String]
   bytesSuffixes = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
   bytesSuffix = bytesSuffixes !! i
+
+getCurrentBranch :: AppState -> IO Text
+getCurrentBranch appState =
+  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
+    Text.strip . Text.pack <$> readCreateProcess
+      (proc "git" ["symbolic-ref", "--short", "HEAD"]) { std_err = UseHandle stderr_ }
+       ""
+
+getCurrentCommit :: AppState -> IO Text
+getCurrentCommit appState =
+  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
+    Text.strip . Text.pack <$> readCreateProcess
+      (proc "git" ["rev-parse", "HEAD"]) { std_err = UseHandle stderr_ }
+       ""

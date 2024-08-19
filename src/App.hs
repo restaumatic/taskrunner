@@ -35,6 +35,7 @@ import Types
 import Utils
 import qualified RemoteCache
 import RemoteCache (getLatestBuildHash)
+import CommitStatus (updateCommitStatus, StatusRequest (..))
 
 getSettings :: IO Settings
 getSettings = do
@@ -45,6 +46,7 @@ getSettings = do
   debug <- (==Just "1") <$> lookupEnv "TASKRUNNER_DEBUG"
   outputStreamTimeout <- maybe 5 read <$> lookupEnv "TASKRUNNER_OUTPUT_STREAM_TIMEOUT"
   saveRemoteCache <- (==Just "1") <$> lookupEnv "TASKRUNNER_SAVE_REMOTE_CACHE"
+  enableCommitStatus <- (==Just "1") <$> lookupEnv "TASKRUNNER_ENABLE_COMMIT_STATUS"
   pure Settings
         { stateDirectory
         , rootDirectory
@@ -52,6 +54,7 @@ getSettings = do
         , debug
         , outputStreamTimeout
         , saveRemoteCache
+        , enableCommitStatus
         }
 
 main :: IO ()
@@ -119,12 +122,15 @@ main = do
 
     logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
 
-    when (exitCode == ExitSuccess) do
+    let isSuccess = exitCode == ExitSuccess
+    m_snapshotArgs <- readIORef appState.snapshotArgsRef
+
+    when isSuccess do
       whenJustM (readIORef appState.hashToSaveRef) \h -> do
         logDebug appState $ "Saving hash " <> h.hash <> " to " <> toText (hashFilename appState)
         Text.writeFile (hashFilename appState) (h.hash <> "\n\n" <> h.hashInput)
 
-        whenJustM (readIORef appState.snapshotArgsRef) \snapshotArgs ->
+        whenJust m_snapshotArgs \snapshotArgs ->
           when (hasOutputs snapshotArgs && settings.saveRemoteCache) do
             logDebug appState "Saving remote cache"
             s <- RemoteCache.getRemoteCacheSettingsFromEnv
@@ -133,6 +139,18 @@ main = do
             when snapshotArgs.fuzzyCache do
               branch <- getCurrentBranch appState
               RemoteCache.setLatestBuildHash appState s (toText appState.jobName) branch h.hash
+
+    let shouldReportStatus = maybe False (.commitStatus) m_snapshotArgs || not isSuccess
+
+    when (appState.settings.enableCommitStatus && shouldReportStatus) do
+      updateCommitStatus appState StatusRequest
+        { state = if isSuccess then "success" else "failure"
+        , target_url = Nothing -- TODO: upload logs
+        , description = Nothing
+        , context = toText appState.jobName
+        }
+
+    -- FIXME: we're reporting status before uploading logs
 
     timeoutStream appState "stdout" $ wait stdoutHandler
 
@@ -220,7 +238,7 @@ snapshot appState args = do
   -- TODO: check for duplicate
   writeIORef appState.snapshotArgsRef (Just args)
 
-  if hasInputs args then do
+  (runTask, statusDescription) <- if hasInputs args then do
     logDebug appState $ "Files to hash: " <> show args.fileInputs
     logDebug appState $ "Raw inputs: " <> show args.rawInputs
 
@@ -248,7 +266,7 @@ snapshot appState args = do
 
       if fromRemote then do
         logDebug appState "Remote cache found, skipping"
-        pure "exit 0"
+        pure (False, Just "cache hit")
       else do
         logDebug appState "Neither local nor remote cache found, running task"
         writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
@@ -271,13 +289,23 @@ snapshot appState args = do
 
           getBranchesToTry appState >>= go
 
-        pure "true"
+        pure (True, Nothing)
     else do
       logDebug appState $ "Hash matches, hash=" <> savedHash <> ", skipping"
-      pure "exit 0"
+      pure (False, Just "local cache hit (?)")
 
   else do
-    pure "true"
+    pure (True, Just "not cached")
+
+  when (args.commitStatus && appState.settings.enableCommitStatus) do
+    updateCommitStatus appState StatusRequest
+      { state = if runTask then "pending" else "success"
+      , target_url = Nothing
+      , description = statusDescription
+      , context = toText appState.jobName
+      }
+
+  pure $ if runTask then "true" else "exit 0"
 
 getBranchesToTry :: AppState -> IO [Text]
 getBranchesToTry appState = do
@@ -285,13 +313,6 @@ getBranchesToTry appState = do
 
   -- TODO: add fallback branches from config
   pure [currentBranch]
-
-getCurrentBranch :: AppState -> IO Text
-getCurrentBranch appState =
-  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
-    Text.strip . Text.pack <$> readCreateProcess
-      (proc "git" ["symbolic-ref", "--short", "HEAD"]) { std_err = UseHandle stderr_ }
-       ""
 
 readFileIfExists :: FilePath -> IO (Maybe Text)
 readFileIfExists fp = do

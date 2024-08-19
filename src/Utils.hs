@@ -12,7 +12,8 @@ import Data.List ((!!))
 import System.Process (CreateProcess(..), StdStream (..), readCreateProcess)
 import Data.Conduit.Process (proc)
 import qualified Data.Text as Text
-import GHC.IO.Handle (hDuplicate)
+import GHC.IO.Handle (hDuplicate, hIsClosed)
+import System.FilePath ((</>))
 
 outputLine :: AppState -> Handle -> ByteString -> ByteString -> IO ()
 outputLine appState toplevelOutput streamName line = do
@@ -24,7 +25,9 @@ outputLine appState toplevelOutput streamName line = do
               B8.pack (formatTime defaultTimeLocale "%T" timestamp) <> " "
           | otherwise = ""
 
-    B8.hPutStrLn appState.logOutput $ timestampStr <> streamName <> " | " <> line
+    logClosed <- hIsClosed appState.logOutput
+    unless logClosed do
+      B8.hPutStrLn appState.logOutput $ timestampStr <> streamName <> " | " <> line
     B8.hPutStrLn toplevelOutput $ timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
 
 logLevel :: ByteString -> AppState -> Text -> IO ()
@@ -72,8 +75,13 @@ getCurrentBranch appState =
        ""
 
 getCurrentCommit :: AppState -> IO Text
-getCurrentCommit appState =
-  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
+getCurrentCommit _appState =
+  -- TODO: fix: we can't use subprocessStderr here because it's used after closing output collector
+  -- Using normal stderr for now
+--  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
     Text.strip . Text.pack <$> readCreateProcess
-      (proc "git" ["rev-parse", "HEAD"]) { std_err = UseHandle stderr_ }
+      (proc "git" ["rev-parse", "HEAD"])
        ""
+
+logFileName :: Settings -> JobName -> FilePath
+logFileName settings jobName = settings.stateDirectory </> "logs" </> (jobName <> ".log")

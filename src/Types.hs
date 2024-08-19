@@ -11,6 +11,7 @@ data Settings = Settings
   , outputStreamTimeout :: Int
   , saveRemoteCache :: Bool
   , enableCommitStatus :: Bool
+  , uploadLogs :: Bool
   } deriving (Show)
 
 type JobName = String
@@ -25,6 +26,7 @@ data AppState = AppState
   , jobName :: JobName
   , hashToSaveRef :: IORef (Maybe HashInfo)
   , snapshotArgsRef :: IORef (Maybe SnapshotCliArgs)
+  , skipped :: IORef Bool
   , toplevelStderr :: Handle
   , subprocessStderr :: Handle
   , logOutput :: Handle

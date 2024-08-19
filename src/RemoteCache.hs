@@ -25,7 +25,7 @@ import Network.URI (parseURI, URI (..), URIAuth(..))
 import System.Directory (makeAbsolute)
 import System.FilePath (makeRelative)
 import qualified System.FilePath as FP
-import Utils (bail, logDebug)
+import Utils (bail, logDebug, logFileName)
 import qualified Amazonka as AWS
 import Control.Exception.Lens (handling)
 import System.Exit (ExitCode(..))
@@ -34,6 +34,7 @@ import qualified Data.Conduit.Text as CT
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
 import Amazonka.S3.PutObject (newPutObject)
+import System.Random (randomIO)
 
 
 packTar :: MonadResource m => AppState -> FilePath -> [FilePath] -> ConduitT () BS.ByteString m ()
@@ -85,6 +86,9 @@ data RemoteCacheSettings = RemoteCacheSettings
 
   , remoteCacheBucket :: Text
   , remoteCachePrefix :: Text
+
+  , logsPrefix :: Text
+  , logsViewUrl :: Text
   }
 
 getRemoteCacheSettingsFromEnv :: IO RemoteCacheSettings
@@ -95,6 +99,8 @@ getRemoteCacheSettingsFromEnv = do
   awsSecretKey <- maybe (error "TASKRUNNER_AWS_SECRET_KEY not provided") toText <$> lookupEnv "TASKRUNNER_AWS_SECRET_KEY"
   remoteCacheBucket <- maybe (error "TASKRUNNER_REMOTE_CACHE_BUCKET not provided") toText <$> lookupEnv "TASKRUNNER_REMOTE_CACHE_BUCKET"
   remoteCachePrefix <- maybe "taskrunner/" toText <$> lookupEnv "TASKRUNNER_REMOTE_CACHE_PREFIX"
+  logsPrefix <- maybe (error "TASKRUNNER_LOGS_PREFIX not provided") toText <$> lookupEnv "TASKRUNNER_LOGS_PREFIX"
+  logsViewUrl <- maybe (error "TASKRUNNER_LOGS_VIEW_URL not provided") toText <$> lookupEnv "TASKRUNNER_LOGS_VIEW_URL"
   pure RemoteCacheSettings{..}
 
 parseEndpoint :: Text -> Maybe (Service -> Service)
@@ -109,7 +115,6 @@ parseEndpoint s = do
 
 -- TODO:
 -- - report speed, size etc.
--- - more debug logging
 -- - integrate amazonka logging
 -- - handle errors
 saveCache
@@ -219,9 +224,36 @@ setLatestBuildHash appState settings jobName branch hash = do
   runConduitRes do
     void $ AWS.send env $ newPutObject (BucketName bucket) (ObjectKey objectKey) (AWS.toBody hash)
 
+uploadLog
+  :: AppState
+  -> RemoteCacheSettings
+  -> IO Text
+uploadLog appState settings = do
+  env <- newAwsEnv appState settings
+  let bucket = settings.remoteCacheBucket
+
+  -- TODO: replace this with run id shared by whole tree
+  randomId <- randomIO @Word64
+
+  let suffix = show randomId <> "/" <> toText appState.jobName <> ".log.txt"
+  let objectKey = settings.logsPrefix <> suffix
+
+  logDebug appState $ "Uploading logs to s3://" <> bucket <> "/" <> objectKey
+
+  content <- BS.readFile (logFileName appState.settings appState.jobName)
+  runConduitRes do
+    void $ AWS.send env $ newPutObject (BucketName bucket) (ObjectKey objectKey) (AWS.toBody content)
+
+  let url = settings.logsViewUrl <> suffix
+
+  logDebug appState $ "Logs uploaded, available at " <> url
+
+  pure url
+
 newAwsEnv :: AppState -> RemoteCacheSettings -> IO AWS.Env
-newAwsEnv appState settings = do
-    logger <- newLogger Info appState.subprocessStderr
+newAwsEnv _appState settings = do
+    -- TODO: use subprocessStderr
+    logger <- newLogger Info stderr
     let endpointFn = fromMaybe (error "invalid TASKRUNNER_S3_ENDPOINT") $ parseEndpoint settings.s3Endpoint
     newEnv (pure . fromKeys (AccessKey (encodeUtf8 settings.awsAccessKey)) (SecretKey (encodeUtf8 settings.awsSecretKey)))
         <&> (\env -> env

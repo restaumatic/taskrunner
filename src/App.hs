@@ -47,6 +47,7 @@ getSettings = do
   outputStreamTimeout <- maybe 5 read <$> lookupEnv "TASKRUNNER_OUTPUT_STREAM_TIMEOUT"
   saveRemoteCache <- (==Just "1") <$> lookupEnv "TASKRUNNER_SAVE_REMOTE_CACHE"
   enableCommitStatus <- (==Just "1") <$> lookupEnv "TASKRUNNER_ENABLE_COMMIT_STATUS"
+  uploadLogs <- (==Just "1") <$> lookupEnv "TASKRUNNER_UPLOAD_LOGS"
   pure Settings
         { stateDirectory
         , rootDirectory
@@ -55,6 +56,7 @@ getSettings = do
         , outputStreamTimeout
         , saveRemoteCache
         , enableCommitStatus
+        , uploadLogs
         }
 
 main :: IO ()
@@ -66,7 +68,6 @@ main = do
   let jobName = fromMaybe (FilePath.takeFileName args.cmd) args.name
 
   let lockFileName = settings.stateDirectory </> "locks" </> (jobName <> ".lock")
-  let logFileName = settings.stateDirectory </> "logs" </> (jobName <> ".log")
 
   createDirectoryIfMissing True (settings.stateDirectory </> "locks")
   createDirectoryIfMissing True (settings.stateDirectory </> "hash")
@@ -75,7 +76,7 @@ main = do
     createDirectoryIfMissing True (settings.stateDirectory </> "logs")
 
     -- Lock (take) it while writing a line to either `logFile` or stdout
-    logFile <- openBinaryFile logFileName WriteMode
+    logFile <- openBinaryFile (logFileName settings jobName) WriteMode
     hSetBuffering logFile LineBuffering
 
     devnull <- openBinaryFile "/dev/null" ReadMode
@@ -92,7 +93,7 @@ main = do
     parentEnv <- getEnvironment
     (stderrPipe, subprocessStderr) <- createPipe
 
-    appState <- AppState settings jobName <$> newIORef Nothing <*> newIORef Nothing <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
+    appState <- AppState settings jobName <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
 
     cmdHandler <- async $ commandHandler appState requestPipeRead responsePipeWrite
 
@@ -120,6 +121,8 @@ main = do
 
     exitCode <- waitForProcess processHandle
 
+    skipped <- readIORef appState.skipped
+
     logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
 
     let isSuccess = exitCode == ExitSuccess
@@ -131,7 +134,7 @@ main = do
         Text.writeFile (hashFilename appState) (h.hash <> "\n\n" <> h.hashInput)
 
         whenJust m_snapshotArgs \snapshotArgs ->
-          when (hasOutputs snapshotArgs && settings.saveRemoteCache) do
+          when (hasOutputs snapshotArgs && settings.saveRemoteCache && not skipped) do
             logDebug appState "Saving remote cache"
             s <- RemoteCache.getRemoteCacheSettingsFromEnv
             RemoteCache.saveCache appState s (fromMaybe "." snapshotArgs.cacheRoot) snapshotArgs.outputs (archiveName appState snapshotArgs h.hash)
@@ -140,18 +143,6 @@ main = do
               branch <- getCurrentBranch appState
               RemoteCache.setLatestBuildHash appState s (toText appState.jobName) branch h.hash
 
-    let shouldReportStatus = maybe False (.commitStatus) m_snapshotArgs || not isSuccess
-
-    when (appState.settings.enableCommitStatus && shouldReportStatus) do
-      updateCommitStatus appState StatusRequest
-        { state = if isSuccess then "success" else "failure"
-        , target_url = Nothing -- TODO: upload logs
-        , description = Nothing
-        , context = toText appState.jobName
-        }
-
-    -- FIXME: we're reporting status before uploading logs
-
     timeoutStream appState "stdout" $ wait stdoutHandler
 
     -- We used `createProcess_`, so we must close it manually
@@ -159,6 +150,25 @@ main = do
     timeoutStream appState "stderr" $ wait stderrHandler
 
     cancel cmdHandler
+
+    let shouldReportStatus = (maybe False (.commitStatus) m_snapshotArgs && not skipped) || not isSuccess
+
+    hClose logFile
+
+    logViewUrl <-
+      if settings.uploadLogs then do
+        s <- RemoteCache.getRemoteCacheSettingsFromEnv
+        Just <$> RemoteCache.uploadLog appState s
+      else
+        pure Nothing
+
+    when (appState.settings.enableCommitStatus && shouldReportStatus) do
+      updateCommitStatus appState StatusRequest
+        { state = if isSuccess then "success" else "failure"
+        , target_url = logViewUrl
+        , description = Nothing
+        , context = toText appState.jobName
+        }
 
     exitWith exitCode
 
@@ -260,7 +270,10 @@ snapshot appState args = do
       fromRemote <-
         if hasOutputs args then do
           s <- RemoteCache.getRemoteCacheSettingsFromEnv
-          RemoteCache.restoreCache appState s (fromMaybe "." args.cacheRoot) (archiveName appState args currentHash)
+          success <- RemoteCache.restoreCache appState s (fromMaybe "." args.cacheRoot) (archiveName appState args currentHash)
+          when success do
+            writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
+          pure success
         else
           pure False
 
@@ -304,6 +317,8 @@ snapshot appState args = do
       , description = statusDescription
       , context = toText appState.jobName
       }
+
+  writeIORef appState.skipped (not runTask)
 
   pure $ if runTask then "true" else "exit 0"
 

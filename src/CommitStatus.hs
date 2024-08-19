@@ -7,7 +7,6 @@ import Universum
 import Data.Aeson (FromJSON(..), ToJSON(..), encode)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Web.JWT (Algorithm(RS256), JWTClaimsSet(..), encodeSigned, numericDate, stringOrURI, EncodeSigner (..), readRsaSecret, JOSEHeader (..))
-import qualified Data.ByteString.Lazy.Char8 as BL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Network.HTTP.Client as HTTP
@@ -16,7 +15,7 @@ import System.Environment (getEnv)
 import Network.HTTP.Types.Status (Status(..))
 import Data.Aeson.Decoding (eitherDecode)
 import qualified Data.Text as Text
-import Utils (getCurrentCommit)
+import Utils (getCurrentCommit, logError, logDebug)
 import Types (AppState)
 
 -- Define the data types for the status update
@@ -52,7 +51,7 @@ updateCommitStatus appState statusRequest = do
   now <- getPOSIXTime
   let claims = mempty { iss = stringOrURI $ T.pack appId
                    , iat = numericDate now
-                   , exp = numericDate (now + 10 * 60)
+                   , exp = numericDate (now + 5 * 60)
                    }
   let jwt = encodeSigned (EncodeRSAPrivateKey privateKey) (mempty { alg = Just RS256 }) claims
 
@@ -74,8 +73,9 @@ updateCommitStatus appState statusRequest = do
   let mTokenResponse = eitherDecode @InstallationTokenResponse (HTTP.responseBody response)
   case mTokenResponse of
     Left err -> do
-      putStrLn @Text $ "Failed to parse installation token response: " <> show err
-      putStrLn @Text $ "Response: " <> decodeUtf8 response.responseBody
+      logError appState $ "CommitStatus: Failed to parse installation token response: " <> show err
+      logError appState $ "CommitStatus: Response: " <> decodeUtf8 response.responseBody
+      exitFailure
     Right tokenResponse -> do
       let accessToken = token tokenResponse
 
@@ -94,8 +94,9 @@ updateCommitStatus appState statusRequest = do
                       }
       statusResponse <- HTTP.httpLbs statusReq manager
       if statusResponse.responseStatus.statusCode == 201
-        then putStrLn @Text "Status updated successfully!"
+        then
+          logDebug appState "Commit status updated successfully"
         else do
-          putStrLn @Text "Failed to update status"
-          BL.putStrLn $ HTTP.responseBody statusResponse
-
+          logError appState $ "CommitStatus: Failed to update commit status: " <> show statusResponse
+          logError appState $ "CommitStatus: Response: " <> decodeUtf8 response.responseBody
+          exitFailure

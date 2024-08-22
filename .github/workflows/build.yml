@@ -8,7 +8,7 @@ jobs:
     services:
       minio:
         image: quay.io/minio/minio
-        command: server /data
+        options: server /data
         environment:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadminpass

@@ -6,6 +6,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+    - name: test running docker
+      run: |
+        docker run --rm -d --name minio -p 9000:9000 \
+          -e MINIO_ROOT_USER=$TASKRUNNER_TEST_S3_SECRET_KEY \
+          -e MINIO_ROOT_PASSWORD=$TASKRUNNER_TEST_S3_SECRET_KEY \
+          quay.io/minio/minio server /data
     - uses: actions/checkout@v2
     - uses: haskell-actions/setup@v2
       with:

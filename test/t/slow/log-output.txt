@@ -1,6 +1,8 @@
 # check logs/mytask.log
 taskrunner -n mytask sh -c '
   echo "some standard output"
+  sleep 1
   echo "some standard error" >&2
+  sleep 1
   echo "more standard output"
 '

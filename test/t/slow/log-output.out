@@ -1,4 +1,4 @@
 -- logs/mytask.log:
 stdout | some standard output
-stdout | more standard output
 stderr | some standard error
+stdout | more standard output

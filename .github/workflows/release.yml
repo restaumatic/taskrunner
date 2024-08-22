@@ -8,6 +8,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+    - name: start service container
+      run: |
+        docker run --rm -d --name minio -p 9000:9000 \
+          -e MINIO_ROOT_USER=minioadmin \
+          -e MINIO_ROOT_PASSWORD=minioadmin \
+          quay.io/minio/minio server /data
+
+        sleep 3
+        curl -s -D- http://localhost:9000
+
     - uses: actions/checkout@v2
     - uses: haskell-actions/setup@v2
       with:
@@ -33,7 +43,12 @@ jobs:
         mkdir dist
         stack --no-terminal build --test --no-run-tests --copy-bins --local-bin-path dist
     - name: Test
-      run: stack --no-terminal build --test
+      run: |
+        export TASKRUNNER_TEST_S3_ENDPOINT=http://localhost:9000
+        export TASKRUNNER_TEST_S3_ACCESS_KEY=minioadmin
+        export TASKRUNNER_TEST_S3_SECRET_KEY=minioadmin
+
+        stack --no-terminal build --test
     - name: Zip
       run: |
         cd dist

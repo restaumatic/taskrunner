@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 module RemoteCache where
 
 import Universum
@@ -33,7 +34,7 @@ import qualified Data.Conduit as C
 import qualified Data.Conduit.Text as CT
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
-import Amazonka.S3.PutObject (newPutObject)
+import Amazonka.S3.PutObject (newPutObject, PutObject(..))
 import System.Random (randomIO)
 
 
@@ -242,7 +243,9 @@ uploadLog appState settings = do
 
   content <- BS.readFile (logFileName appState.settings appState.jobName)
   runConduitRes do
-    void $ AWS.send env $ newPutObject (BucketName bucket) (ObjectKey objectKey) (AWS.toBody content)
+    void $ AWS.send env $ (newPutObject (BucketName bucket) (ObjectKey objectKey) (AWS.toBody content) :: PutObject)
+      { contentType = Just "text/plain; charset=utf-8"
+      }
 
   let url = settings.logsViewUrl <> suffix
 

@@ -1,0 +1,4 @@
+-- output:
+[mytask] stdout | Expensive computation
+Output in a is: oof
+Output in b is: oof

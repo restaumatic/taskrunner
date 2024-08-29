@@ -1,8 +1,6 @@
 # no toplevel
 # s3
 
-export TASKRUNNER_DEBUG=1
-
 export TASKRUNNER_SAVE_REMOTE_CACHE=1
 
 mkdir a

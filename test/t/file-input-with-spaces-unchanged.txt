@@ -1,0 +1,15 @@
+# no toplevel
+
+echo lol > 'some input.txt'
+git init -q
+git add 'some input.txt'
+
+go() {
+  taskrunner -n mytask bash -e -c '
+    snapshot "some input.txt"
+    echo "Expensive computation"
+  '
+}
+
+go
+go

@@ -5,7 +5,7 @@ module App where
 import Universum
 
 import System.Environment (setEnv, lookupEnv, getEnvironment)
-import System.Process (createProcess_, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe,  readCreateProcess)
+import System.Process (createProcess_, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe,  readCreateProcess, withCreateProcess)
 import System.IO (openBinaryFile, hSetBuffering, BufferMode (LineBuffering) )
 import qualified System.FilePath as FilePath
 import System.FilePath ((</>))
@@ -36,6 +36,7 @@ import Utils
 import qualified RemoteCache
 import RemoteCache (getLatestBuildHash)
 import CommitStatus (updateCommitStatus, StatusRequest (..))
+import qualified System.Process as Process
 
 getSettings :: IO Settings
 getSettings = do
@@ -133,7 +134,10 @@ main = do
         logDebug appState $ "Saving hash " <> h.hash <> " to " <> toText (hashFilename appState)
         Text.writeFile (hashFilename appState) (h.hash <> "\n\n" <> h.hashInput)
 
-        whenJust m_snapshotArgs \snapshotArgs ->
+        whenJust m_snapshotArgs \snapshotArgs -> do
+          forM_ snapshotArgs.postUnpackCommands \cmd -> do
+            runPostUnpackCmd appState cmd
+
           when (hasOutputs snapshotArgs && settings.saveRemoteCache && not skipped) do
             logDebug appState "Saving remote cache"
             s <- RemoteCache.getRemoteCacheSettingsFromEnv
@@ -171,6 +175,20 @@ main = do
         }
 
     exitWith exitCode
+
+runPostUnpackCmd :: AppState -> String -> IO ()
+runPostUnpackCmd appState cmd = do
+  logDebug appState $ "Running post-unpack cmd " <> show cmd
+  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
+    withCreateProcess (
+      (Process.shell cmd)
+        { std_out = UseHandle stderr_ -- TODO: really, we should have subprocesStdout also
+        , std_err = UseHandle stderr_
+        }
+       ) \_ _ _ process -> do
+           exitCode <- liftIO $ waitForProcess process
+           when (exitCode /= ExitSuccess) do
+             bail $ "post-unpack cmd failed with code: " <> show exitCode
 
 archiveName :: AppState -> SnapshotCliArgs -> Text -> Text
 archiveName appState snapshotArgs hash = toText appState.jobName <> maybe "" ("-"<>) snapshotArgs.cacheVersion <> "-" <> hash <> ".tar.zst"

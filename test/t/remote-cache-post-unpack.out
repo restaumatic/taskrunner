@@ -1,0 +1,10 @@
+-- output:
+[mytask] stdout | Expensive computation
+[mytask] stderr | post-unpack stdout
+[mytask] stderr | post-unpack stderr
+Output in a is: oof
+Output2 in a is: oof
+[mytask] stderr | post-unpack stdout
+[mytask] stderr | post-unpack stderr
+Output in b is: oof
+Output2 in b is: oof

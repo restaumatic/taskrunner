@@ -1,0 +1,44 @@
+# no toplevel
+# s3
+
+export TASKRUNNER_DEBUG=1
+
+export TASKRUNNER_SAVE_REMOTE_CACHE=1
+
+mkdir a
+
+(
+  cd a
+  echo foo > input.txt
+  git init -q
+  git add input.txt
+)
+
+cp -r a b
+
+go() {
+  # Note: we want separate workdir for separate repos
+  TASKRUNNER_STATE_DIRECTORY="$(pwd)" taskrunner -n mytask bash -e -c '
+    snapshot input.txt --outputs output.txt --cmd "
+      echo post-unpack stdout
+      echo post-unpack stderr >&2
+      cp output.txt output2.txt
+    "
+    echo "Expensive computation"
+    rev input.txt > output.txt
+  '
+}
+
+(
+  cd a
+  go
+  echo "Output in a is: $(cat output.txt)"
+  echo "Output2 in a is: $(cat output2.txt)"
+)
+
+(
+  cd b
+  go # should not run expensive computation, download instead, but should run post-unpack cmd
+  echo "Output in b is: $(cat output.txt)"
+  echo "Output2 in b is: $(cat output2.txt)"
+)

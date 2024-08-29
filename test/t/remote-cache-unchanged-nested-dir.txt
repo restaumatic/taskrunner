@@ -1,0 +1,48 @@
+# no toplevel
+# s3
+
+# Check how caching works when we're not running directly in root dir.
+# We should still be able to cache stuff outside cwd (but inside root dir).
+
+export TASKRUNNER_SAVE_REMOTE_CACHE=1
+
+mkdir -p a
+
+(
+  cd a
+  git init -q
+  mkdir nested
+  cd nested
+  echo foo > input.txt
+  git add input.txt
+)
+
+cp -r a b
+
+go() {
+  # Note: we want separate workdir for separate repos
+  export TASKRUNNER_STATE_DIRECTORY="$(pwd)" TASKRUNNER_ROOT_DIRECTORY="$(pwd)"
+  (
+    cd nested
+    taskrunner -n mytask bash -e -c '
+      snapshot input.txt --outputs output.txt ../output2.txt
+      echo "Expensive computation"
+      rev input.txt > output.txt
+      cp output.txt ../output2.txt
+    '
+  )
+}
+
+(
+  cd a
+  go
+  echo "Output in a is: $(cat nested/output.txt)"
+  echo "Output2 in a is: $(cat output2.txt)"
+)
+
+(
+  cd b
+  go ../out_b # note: should not compute again
+  echo "Output in b is: $(cat nested/output.txt)"
+  echo "Output2 in b is: $(cat output2.txt)"
+)

@@ -141,7 +141,7 @@ main = do
           when (hasOutputs snapshotArgs && settings.saveRemoteCache && not skipped) do
             logDebug appState "Saving remote cache"
             s <- RemoteCache.getRemoteCacheSettingsFromEnv
-            RemoteCache.saveCache appState s (fromMaybe "." snapshotArgs.cacheRoot) snapshotArgs.outputs (archiveName appState snapshotArgs h.hash)
+            RemoteCache.saveCache appState s (fromMaybe settings.rootDirectory snapshotArgs.cacheRoot) snapshotArgs.outputs (archiveName appState snapshotArgs h.hash)
 
             when snapshotArgs.fuzzyCache do
               branch <- getCurrentBranch appState
@@ -288,7 +288,7 @@ snapshot appState args = do
       fromRemote <-
         if hasOutputs args then do
           s <- RemoteCache.getRemoteCacheSettingsFromEnv
-          success <- RemoteCache.restoreCache appState s (fromMaybe "." args.cacheRoot) (archiveName appState args currentHash)
+          success <- RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash)
           when success do
             writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
           pure success

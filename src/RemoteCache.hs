@@ -23,7 +23,7 @@ import Types
 import System.Process (CreateProcess(..), cleanupProcess, createProcess_, StdStream (..), proc, waitForProcess)
 import Conduit (sourceHandle, sinkHandle, foldMapC)
 import Network.URI (parseURI, URI (..), URIAuth(..))
-import System.Directory (makeAbsolute)
+import System.Directory (makeAbsolute, canonicalizePath)
 import System.FilePath (makeRelative)
 import qualified System.FilePath as FP
 import Utils (bail, logDebug, logFileName)
@@ -131,11 +131,14 @@ saveCache appState settings relativeCacheRoot files archiveName = do
     let bucket = settings.remoteCacheBucket
     let objectKey = settings.remoteCachePrefix <> "bundles/" <> archiveName
 
-    cacheRoot <- makeAbsolute relativeCacheRoot
+    cacheRoot <- makeAbsolute relativeCacheRoot >>= canonicalizePath
+
+    logDebug appState $ "Cache root: " <> show cacheRoot
 
     filesRelativeToCacheRoot <- forM files \filepath -> do
       -- filepath is relative to cwd
-      absFilepath <- makeAbsolute filepath
+      absFilepath <- makeAbsolute filepath >>= canonicalizePath
+      logDebug appState $ "makeAbsolute: " <> show filepath <> " -> " <> show absFilepath
       let relative = makeRelative cacheRoot absFilepath
       when (FP.isAbsolute relative) do
         bail $ "Path " <> absFilepath <> " is outside cacheRoot (" <> cacheRoot <> ")"

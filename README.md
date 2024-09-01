@@ -37,6 +37,17 @@
 
 - Fast - if there's nothing to do, returns quickly (<1s, ideally <300ms)
 
+## "Prime cache" mode
+
+When migrating from another system behind a flag, it is sometimes desirable to build on the old system but still fill remote cache one the new one. For that occasion, a special "prime cache mode" is there.
+
+It modifies the behavior in the following way:
+- `snapshot` never downloads remote cache (incl. fuzzy) - to avoid overwriting stuff (which we assume is already built via another mechanism)
+- `snapshot` always skips the job
+- remote cache is uploaded, despite job being skipped
+
+To use it, first build using another system, and the run `taskrunner` with `TASKRUNNER_PRIME_CACHE_MODE=1`
+
 ## Possible features
 
 - Support stdin? For now redirected from `/dev/null`

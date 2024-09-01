@@ -13,6 +13,7 @@ data Settings = Settings
   , enableCommitStatus :: Bool
   , uploadLogs :: Bool
   , fuzzyCacheFallbackBranches :: [Text]
+  , primeCacheMode :: Bool
   } deriving (Show)
 
 type JobName = String

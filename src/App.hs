@@ -51,6 +51,7 @@ getSettings = do
   enableCommitStatus <- (==Just "1") <$> lookupEnv "TASKRUNNER_ENABLE_COMMIT_STATUS"
   uploadLogs <- (==Just "1") <$> lookupEnv "TASKRUNNER_UPLOAD_LOGS"
   fuzzyCacheFallbackBranches <- maybe [] (Text.words . toText) <$> lookupEnv "TASKRUNNER_FALLBACK_BRANCHES"
+  primeCacheMode <- (==Just "1") <$> lookupEnv "TASKRUNNER_PRIME_CACHE_MODE"
   pure Settings
         { stateDirectory
         , rootDirectory
@@ -61,6 +62,7 @@ getSettings = do
         , enableCommitStatus
         , uploadLogs
         , fuzzyCacheFallbackBranches
+        , primeCacheMode
         }
 
 main :: IO ()
@@ -141,7 +143,7 @@ main = do
           forM_ snapshotArgs.postUnpackCommands \cmd -> do
             runPostUnpackCmd appState cmd
 
-          when (hasOutputs snapshotArgs && settings.saveRemoteCache && not skipped) do
+          when (hasOutputs snapshotArgs && settings.saveRemoteCache && (not skipped || appState.settings.primeCacheMode)) do
             logDebug appState "Saving remote cache"
             s <- RemoteCache.getRemoteCacheSettingsFromEnv
             RemoteCache.saveCache appState s (fromMaybe settings.rootDirectory snapshotArgs.cacheRoot) snapshotArgs.outputs (archiveName appState snapshotArgs h.hash)
@@ -293,6 +295,11 @@ snapshot appState args = do
       earlyReturn (False, Just "local cache hit (?)")
 
     logDebug appState $ "Hash mismatch, saved=" <>  savedHash <> ", current=" <>  currentHash
+
+    when appState.settings.primeCacheMode do
+      logDebug appState "Prime cache mode, assuming task is done and skippping!"
+      writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
+      earlyReturn (False, Nothing)
 
     when (hasOutputs args) do
       s <- RemoteCache.getRemoteCacheSettingsFromEnv

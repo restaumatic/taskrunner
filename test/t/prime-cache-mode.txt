@@ -1,0 +1,36 @@
+# no toplevel
+# s3
+
+export TASKRUNNER_SAVE_REMOTE_CACHE=1
+
+mkdir a
+
+(
+  cd a
+  echo foo > input.txt
+  git init -q
+  git add input.txt
+)
+
+cp -r a b
+
+go() {
+  # Note: we want separate workdir for separate repos
+  TASKRUNNER_STATE_DIRECTORY="$(pwd)" taskrunner -n mytask bash -e -c '
+    snapshot input.txt --outputs output.txt
+    echo "Expensive computation"
+  '
+}
+
+(
+  cd a
+  echo "some output" > output.txt
+  TASKRUNNER_PRIME_CACHE_MODE=1 go # should not run expensive computation
+  echo "Output in a is: $(cat output.txt)"
+)
+
+(
+  cd b
+  go # also should not run computation, got it from cache
+  echo "Output in b is: $(cat output.txt)"
+)

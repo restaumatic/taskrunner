@@ -33,8 +33,8 @@ newtype InstallationTokenResponse = InstallationTokenResponse
   } deriving (Show, Generic)
   deriving anyclass (FromJSON)
 
-updateCommitStatus :: AppState -> StatusRequest -> IO ()
-updateCommitStatus appState statusRequest = do
+updateCommitStatus :: MonadIO m => AppState -> StatusRequest -> m ()
+updateCommitStatus appState statusRequest = liftIO do
   -- Load environment variables
   appId <- getEnv "GITHUB_APP_ID"
   installationId <- getEnv "GITHUB_INSTALLATION_ID"

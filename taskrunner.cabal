@@ -28,6 +28,7 @@ library
       App
       CliArgs
       CommitStatus
+      Control.Monad.EarlyReturn
       RemoteCache
       SnapshotCliArgs
       Types
@@ -109,6 +110,7 @@ library
     , temporary
     , text
     , time
+    , transformers
     , universum
     , unix
     , zstd
@@ -194,6 +196,7 @@ executable taskrunner
     , temporary
     , text
     , time
+    , transformers
     , universum
     , unix
     , zstd
@@ -282,6 +285,7 @@ test-suite taskrunner-test
     , temporary
     , text
     , time
+    , transformers
     , universum
     , unix
     , zstd

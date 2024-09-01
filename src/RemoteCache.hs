@@ -92,8 +92,8 @@ data RemoteCacheSettings = RemoteCacheSettings
   , logsViewUrl :: Text
   }
 
-getRemoteCacheSettingsFromEnv :: IO RemoteCacheSettings
-getRemoteCacheSettingsFromEnv = do
+getRemoteCacheSettingsFromEnv :: MonadIO m => m RemoteCacheSettings
+getRemoteCacheSettingsFromEnv = liftIO do
   s3Endpoint <- maybe "https://s3.amazonaws.com" toText <$> lookupEnv "TASKRUNNER_S3_ENDPOINT"
   awsRegion <- maybe "eu-central-1" toText <$> lookupEnv "TASKRUNNER_AWS_REGION"
   awsAccessKey <- maybe (error "TASKRUNNER_AWS_ACCESS_KEY not provided") toText <$> lookupEnv "TASKRUNNER_AWS_ACCESS_KEY"

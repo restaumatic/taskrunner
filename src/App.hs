@@ -37,6 +37,7 @@ import qualified RemoteCache
 import RemoteCache (getLatestBuildHash)
 import CommitStatus (updateCommitStatus, StatusRequest (..))
 import qualified System.Process as Process
+import Control.Monad.EarlyReturn (withEarlyReturn, earlyReturn)
 
 getSettings :: IO Settings
 getSettings = do
@@ -268,13 +269,15 @@ snapshot appState args = do
   -- TODO: check for duplicate
   writeIORef appState.snapshotArgsRef (Just args)
 
-  (runTask, statusDescription) <- if hasInputs args then do
+  (runTask, statusDescription) <- withEarlyReturn do
+    unless (hasInputs args) $ earlyReturn (True, Just "not cached")
+
     logDebug appState $ "Files to hash: " <> show args.fileInputs
     logDebug appState $ "Raw inputs: " <> show args.rawInputs
 
     filesHashInput <-
       if not (null args.fileInputs) then
-        hashFileInputs appState args.fileInputs
+        liftIO $ hashFileInputs appState args.fileInputs
       else
         pure ""
 
@@ -285,50 +288,27 @@ snapshot appState args = do
 
     savedHash <- Text.takeWhile (/= '\n') . fromMaybe "none" <$> readFileIfExists (hashFilename appState)
 
-    if currentHash /= savedHash then do
-      logDebug appState $ "Hash mismatch, saved=" <>  savedHash <> ", current=" <>  currentHash
-      fromRemote <-
-        if hasOutputs args then do
-          s <- RemoteCache.getRemoteCacheSettingsFromEnv
-          success <- RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash)
-          when success do
-            writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
-          pure success
-        else
-          pure False
-
-      if fromRemote then do
-        logDebug appState "Remote cache found, skipping"
-        pure (False, Just "cache hit")
-      else do
-        logDebug appState "Neither local nor remote cache found, running task"
-        writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
-
-        when (hasOutputs args && args.fuzzyCache) do
-          s <- RemoteCache.getRemoteCacheSettingsFromEnv
-          let
-            go [] = pure ()
-            go (branch:xs) = do
-              m_latestHash <- getLatestBuildHash appState s (toText appState.jobName) branch
-              case m_latestHash of
-                Nothing ->
-                  go xs
-                Just hash -> do
-                  success <- RemoteCache.restoreCache appState s (fromMaybe "." args.cacheRoot) (archiveName appState args hash)
-                  if success then
-                    logDebug appState $ "Restored fuzzy cache from branch " <> branch <> ", hash=" <> hash
-                  else
-                    go xs
-
-          getBranchesToTry appState >>= go
-
-        pure (True, Nothing)
-    else do
+    when (currentHash == savedHash) do
       logDebug appState $ "Hash matches, hash=" <> savedHash <> ", skipping"
-      pure (False, Just "local cache hit (?)")
+      earlyReturn (False, Just "local cache hit (?)")
 
-  else do
-    pure (True, Just "not cached")
+    logDebug appState $ "Hash mismatch, saved=" <>  savedHash <> ", current=" <>  currentHash
+
+    when (hasOutputs args) do
+      s <- RemoteCache.getRemoteCacheSettingsFromEnv
+      success <- liftIO $ RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash)
+      when success do
+        writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
+        logDebug appState "Remote cache found, skipping"
+        earlyReturn (False, Just "cache hit")
+
+    logDebug appState "Neither local nor remote cache found, running task"
+    writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
+
+    when (hasOutputs args && args.fuzzyCache) do
+      tryRestoreFuzzyCache appState args
+
+    pure (True, Nothing)
 
   when (args.commitStatus && appState.settings.enableCommitStatus) do
     updateCommitStatus appState StatusRequest
@@ -342,13 +322,32 @@ snapshot appState args = do
 
   pure $ if runTask then "true" else "exit 0"
 
-getBranchesToTry :: AppState -> IO [Text]
-getBranchesToTry appState = do
+tryRestoreFuzzyCache :: MonadIO m => AppState -> SnapshotCliArgs -> m ()
+tryRestoreFuzzyCache appState args = do
+  s <- RemoteCache.getRemoteCacheSettingsFromEnv
+  let
+    go [] = pure ()
+    go (branch:xs) = do
+      m_latestHash <- getLatestBuildHash appState s (toText appState.jobName) branch
+      case m_latestHash of
+        Nothing ->
+          go xs
+        Just hash -> do
+          success <- RemoteCache.restoreCache appState s (fromMaybe "." args.cacheRoot) (archiveName appState args hash)
+          if success then
+            logDebug appState $ "Restored fuzzy cache from branch " <> branch <> ", hash=" <> hash
+          else
+            go xs
+
+  liftIO $ getBranchesToTry appState >>= go
+
+getBranchesToTry :: MonadIO m => AppState -> m [Text]
+getBranchesToTry appState = liftIO do
   currentBranch <- getCurrentBranch appState
   pure $ currentBranch : appState.settings.fuzzyCacheFallbackBranches
 
-readFileIfExists :: FilePath -> IO (Maybe Text)
-readFileIfExists fp = do
+readFileIfExists :: MonadIO m => FilePath -> m (Maybe Text)
+readFileIfExists fp = liftIO do
   exists <- doesFileExist fp
   if exists then Just <$> Text.readFile fp else pure Nothing
 

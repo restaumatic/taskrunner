@@ -30,14 +30,14 @@ outputLine appState toplevelOutput streamName line = do
       B8.hPutStrLn appState.logOutput $ timestampStr <> streamName <> " | " <> line
     B8.hPutStrLn toplevelOutput $ timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
 
-logLevel :: ByteString -> AppState -> Text -> IO ()
+logLevel :: MonadIO m => ByteString -> AppState -> Text -> m ()
 logLevel level appState msg =
-  forM_ (lines msg) $ outputLine appState appState.toplevelStderr level . encodeUtf8
+  liftIO $ forM_ (lines msg) $ outputLine appState appState.toplevelStderr level . encodeUtf8
 
-logDebug :: AppState -> Text -> IO ()
+logDebug :: MonadIO m => AppState -> Text -> m ()
 logDebug appState msg = when appState.settings.debug $ logLevel "debug" appState msg
 
-logError :: AppState -> Text -> IO ()
+logError :: MonadIO m => AppState -> Text -> m ()
 logError = logLevel "error"
 
 newtype TaskrunnerError = TaskrunnerError String deriving newtype (Show)

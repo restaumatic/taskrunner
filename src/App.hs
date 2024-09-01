@@ -49,6 +49,7 @@ getSettings = do
   saveRemoteCache <- (==Just "1") <$> lookupEnv "TASKRUNNER_SAVE_REMOTE_CACHE"
   enableCommitStatus <- (==Just "1") <$> lookupEnv "TASKRUNNER_ENABLE_COMMIT_STATUS"
   uploadLogs <- (==Just "1") <$> lookupEnv "TASKRUNNER_UPLOAD_LOGS"
+  fuzzyCacheFallbackBranches <- maybe [] (Text.words . toText) <$> lookupEnv "TASKRUNNER_FALLBACK_BRANCHES"
   pure Settings
         { stateDirectory
         , rootDirectory
@@ -58,6 +59,7 @@ getSettings = do
         , saveRemoteCache
         , enableCommitStatus
         , uploadLogs
+        , fuzzyCacheFallbackBranches
         }
 
 main :: IO ()
@@ -343,9 +345,7 @@ snapshot appState args = do
 getBranchesToTry :: AppState -> IO [Text]
 getBranchesToTry appState = do
   currentBranch <- getCurrentBranch appState
-
-  -- TODO: add fallback branches from config
-  pure [currentBranch]
+  pure $ currentBranch : appState.settings.fuzzyCacheFallbackBranches
 
 readFileIfExists :: FilePath -> IO (Maybe Text)
 readFileIfExists fp = do

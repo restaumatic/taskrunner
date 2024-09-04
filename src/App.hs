@@ -40,6 +40,7 @@ import qualified System.Process as Process
 import Control.Monad.EarlyReturn (withEarlyReturn, earlyReturn)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import Data.Time.Clock (getCurrentTime)
+import qualified Data.ByteString.Lazy.Char8 as BL8
 
 getSettings :: IO Settings
 getSettings = do
@@ -89,8 +90,13 @@ main = do
     createDirectory (buildDir </> "logs")
     createDirectory (buildDir </> "results")
 
+  m_parentRequestPipe <- getParentRequestPipe
+
+  logDebugParent m_parentRequestPipe $ "Starting subtask " <> toText jobName
+
   withFileLock lockFileName Exclusive \_ -> do
     whenJustM (readResultFile buildDir jobName) \exitCode -> do
+      logDebugParent m_parentRequestPipe $ "Subtask " <> toText jobName <> " finished with " <> show exitCode
       when settings.debug do
         hPutStrLn stderr $ "Task " <> jobName <> " already finished in this build with " <> show exitCode
       exitWith exitCode
@@ -145,6 +151,7 @@ main = do
     skipped <- readIORef appState.skipped
 
     logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
+    logDebugParent m_parentRequestPipe $ "Subtask " <> toText jobName <> " finished with " <> show exitCode
 
     writeFile (buildDir </> "results" </> jobName) (show (exitCodeToInt exitCode))
 
@@ -197,6 +204,27 @@ main = do
         }
 
     exitWith exitCode
+
+getParentRequestPipe :: IO (Maybe Handle)
+getParentRequestPipe = do
+  let envName = "_taskrunner_request_pipe"
+  envValue <- lookupEnv envName
+  case envValue of
+    Nothing ->
+      pure Nothing
+    Just value ->
+      case readMaybe value of
+        Nothing ->
+          bail $ "Invalid file descriptor " <> show value <> " in " <> envName
+        Just fd -> do
+          h <- fdToHandle fd
+          hSetBuffering h LineBuffering
+          pure (Just h)
+
+-- | Issue a debug message to the parent task's log (if there is a parent).
+logDebugParent :: Maybe Handle -> Text -> IO ()
+logDebugParent Nothing _ = pure ()
+logDebugParent (Just h) msg = BL8.hPutStrLn h $ Aeson.encode ["debug", msg]
 
 readResultFile :: FilePath -> JobName -> IO (Maybe ExitCode)
 readResultFile buildDir jobName = do
@@ -292,23 +320,33 @@ commandHandler appState requestPipe responsePipe =
         B8.hPutStrLn responsePipe "exit 1"
       Right cmd -> do
         logDebug appState $ "Running cmdpipe command: " <> show cmd
-        result <- case cmd of
+        m_result <- case cmd of
+
           "snapshot":sargs -> do
             case SnapshotCliArgs.parse sargs of
               Left err -> do
                 logError appState $ "snapshot: " <> toText err
-                pure "exit 1"
+                pure (Just "exit 1")
               Right args -> do
                 response <- snapshot appState args
                   `catch` (\(e :: SomeException) -> do
                       logError appState $ "snapshot command failed with exception: " <> show e
                       pure "exit 1")
-                pure (encodeUtf8 response)
+                pure $ Just $ encodeUtf8 response
+
+          "debug":args -> do
+            -- debug - debug message which should land in our log, but originates from a subtask
+
+            logDebug appState (unwords (toText <$> args))
+            -- No reply, because this command can be issued concurrently
+            pure Nothing
+
           _ -> do
             logError appState $ "Unknown command in command pipe: " <> show cmd
-            pure "exit 1"
-        logDebug appState $ "cmdpipe command result: " <> show result
-        B8.hPutStrLn responsePipe result
+            pure (Just "exit 1")
+        whenJust m_result \result -> do
+          logDebug appState $ "cmdpipe command result: " <> show result
+          B8.hPutStrLn responsePipe result
 
 hasInputs :: SnapshotCliArgs -> Bool
 hasInputs args = not (null args.fileInputs) || not (null args.rawInputs)

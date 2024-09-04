@@ -1,0 +1,6 @@
+-- output:
+[foo] debug | Starting subtask bar
+[bar] stdout | hello
+[foo] debug | Subtask bar finished with ExitSuccess
+[foo] debug | Starting subtask bar
+[foo] debug | Subtask bar finished with ExitSuccess

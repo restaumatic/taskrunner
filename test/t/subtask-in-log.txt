@@ -1,0 +1,8 @@
+# no toplevel
+
+TASKRUNNER_DEBUG=1 taskrunner -n foo bash -c '
+  taskrunner -n bar echo hello
+
+  # again, skipped
+  taskrunner -n bar echo hello
+' 2>&1 | grep -E '([|] (Subtask|Starting subtask|hello))'

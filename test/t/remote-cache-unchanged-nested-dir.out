@@ -4,6 +4,7 @@
 [mytask] info | success
 Output in a is: oof
 Output2 in a is: oof
+[mytask] info | Found remote cache mytask-c6621d9fa9e14eff5f583847f3d3463767c6c082.tar.zst, restoring
 [mytask] info | Restored from remote cache
 Output in b is: oof
 Output2 in b is: oof

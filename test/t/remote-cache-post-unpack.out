@@ -6,6 +6,7 @@
 [mytask] stderr | post-unpack stderr
 Output in a is: oof
 Output2 in a is: oof
+[mytask] info | Found remote cache mytask-6b36308659163b577fd1c832107dc46ca3aa659b.tar.zst, restoring
 [mytask] info | Restored from remote cache
 [mytask] stderr | post-unpack stdout
 [mytask] stderr | post-unpack stderr

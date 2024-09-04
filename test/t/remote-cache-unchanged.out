@@ -3,5 +3,6 @@
 [mytask] stdout | Expensive computation
 [mytask] info | success
 Output in a is: oof
+[mytask] info | Found remote cache mytask-6b36308659163b577fd1c832107dc46ca3aa659b.tar.zst, restoring
 [mytask] info | Restored from remote cache
 Output in b is: oof

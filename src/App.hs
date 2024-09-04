@@ -406,7 +406,7 @@ snapshot appState args = do
 
     when (hasOutputs args) do
       s <- RemoteCache.getRemoteCacheSettingsFromEnv
-      success <- liftIO $ RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash) RemoteCache.NoLog
+      success <- liftIO $ RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash) RemoteCache.Log
       when success do
         writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
         logInfo appState "Restored from remote cache"

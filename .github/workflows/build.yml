@@ -51,7 +51,7 @@ jobs:
         cd dist
         tar czvf taskrunner-linux.tar.gz taskrunner
     - name: Archive production artifacts
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: taskrunner-linux.tar.gz
         path: |

@@ -35,7 +35,6 @@ import qualified Data.Conduit.Text as CT
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
 import Amazonka.S3.PutObject (newPutObject, PutObject(..))
-import System.Random (randomIO)
 
 
 packTar :: MonadResource m => AppState -> FilePath -> [FilePath] -> ConduitT () BS.ByteString m ()
@@ -236,10 +235,7 @@ uploadLog appState settings = do
   env <- newAwsEnv appState settings
   let bucket = settings.remoteCacheBucket
 
-  -- TODO: replace this with run id shared by whole tree
-  randomId <- randomIO @Word64
-
-  let suffix = show randomId <> "/" <> toText appState.jobName <> ".log.txt"
+  let suffix = appState.buildId <> "/" <> toText appState.jobName <> ".log.txt"
   let objectKey = settings.logsPrefix <> suffix
 
   logDebug appState $ "Uploading logs to s3://" <> bucket <> "/" <> objectKey

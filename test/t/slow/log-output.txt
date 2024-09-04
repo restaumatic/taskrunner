@@ -9,3 +9,6 @@ taskrunner -n mytask sh -c '
   sleep 1
   echo "more standard output"
 '
+
+# debug output is too nondeterministic
+sed -i '/debug/d' logs/*.log

@@ -13,3 +13,6 @@ taskrunner -n bar sh -c '
   echo "bar standard error" >&2
 ' &
 wait
+
+# debug output is too nondeterministic
+sed -i '/debug/d' logs/*.log

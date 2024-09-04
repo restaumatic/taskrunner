@@ -23,9 +23,13 @@ data HashInfo = HashInfo
   , hashInput :: Text
   }
 
+type BuildId = Text
+
 data AppState = AppState
   { settings :: Settings
   , jobName :: JobName
+  , buildId :: BuildId
+  , isToplevel :: Bool
   , hashToSaveRef :: IORef (Maybe HashInfo)
   , snapshotArgsRef :: IORef (Maybe SnapshotCliArgs)
   , skipped :: IORef Bool

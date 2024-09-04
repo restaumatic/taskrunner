@@ -83,5 +83,5 @@ getCurrentCommit _appState =
       (proc "git" ["rev-parse", "HEAD"])
        ""
 
-logFileName :: Settings -> JobName -> FilePath
-logFileName settings jobName = settings.stateDirectory </> "logs" </> (jobName <> ".log")
+logFileName :: Settings -> BuildId -> JobName -> FilePath
+logFileName settings buildId jobName = settings.stateDirectory </> "builds" </> toString buildId </> "logs" </> (jobName <> ".log")

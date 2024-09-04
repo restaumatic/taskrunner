@@ -1,4 +1,7 @@
 # check logs/mytask.log
+
+ln -s "builds/${_taskrunner_build_id}/logs" logs
+
 taskrunner -n mytask sh -c '
   echo "some standard output"
   sleep 1

@@ -1,5 +1,6 @@
 # no toplevel
-# Same as "lock" test, but without toplevel wrapper. This checks that the lock is truly system-wide.
+# Similar to "lock" test, but without toplevel wrapper. This checks that the lock is truly system-wide.
+# An important difference is that now `second` is not skipped, because it's a different run.
 
 (
   taskrunner -n locked sh -c '

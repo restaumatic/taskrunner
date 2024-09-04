@@ -1,0 +1,4 @@
+-- output:
+[foo] stdout | Executing
+[toplevel] stdout | failed 1
+[toplevel] stdout | failed 2

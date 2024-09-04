@@ -244,7 +244,7 @@ uploadLog appState settings = do
 
   logDebug appState $ "Uploading logs to s3://" <> bucket <> "/" <> objectKey
 
-  content <- BS.readFile (logFileName appState.settings appState.jobName)
+  content <- BS.readFile (logFileName appState.settings appState.buildId appState.jobName)
   runConduitRes do
     void $ AWS.send env $ (newPutObject (BucketName bucket) (ObjectKey objectKey) (AWS.toBody content) :: PutObject)
       { contentType = Just "text/plain; charset=utf-8"

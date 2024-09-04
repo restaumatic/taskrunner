@@ -1,4 +1,7 @@
 # check logs/foo.log logs/bar.log
+
+ln -s "builds/${_taskrunner_build_id}/logs" logs
+
 taskrunner -n foo sh -c '
   echo "foo standard output"
   sleep 0.1

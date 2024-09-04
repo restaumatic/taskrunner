@@ -7,7 +7,8 @@
 # the two tasks would run in parallel with `second` being written first (after
 # ~1 second), and then `first` (after ~2 seconds).
 #
-# With locking, the result should be `first` then `second`.
+# With locking, the result should be `first`, then  `second`.
+# Note that we print `second` outside (after) the actual job, because the job will not be re-run inside a single build.
 #
 # The markers are written to a file, to make the test somewhat independent of nested output handling.
 
@@ -20,9 +21,8 @@
 
 (
   sleep 1
-  taskrunner -n locked sh -c '
-    echo second >> state.txt
-  '
+  taskrunner -n locked sh -c true
+  echo second >> state.txt
 ) &
 
 wait

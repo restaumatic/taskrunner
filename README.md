@@ -48,6 +48,20 @@ It modifies the behavior in the following way:
 
 To use it, first build using another system, and the run `taskrunner` with `TASKRUNNER_PRIME_CACHE_MODE=1`
 
+## Directory structure
+
+- `$TASKRUNNER_STATE_DIRECTORY` (default: `/tmp/taskrunner`)
+  - `locks` - global locks per job
+    - `${jobName}.lock` - job lock file, job takes the lock when running
+  - `hash` - hashes of inputs of already-done jobs
+    - `${jobName}.hash` - first line is hash, rest is hash input (for debugging)
+  - `builds` - build state directory for each build. Each toplevel invocation creates a subdirectory here.
+    - `${buildId}` - state dir of a specific build. `buildId` is derived from the invocation time.
+      - `logs` - logs produced by jobs in that build.
+        - `${jobName}.log` - log, without ANSI sequences stripped
+      - `results` - per-build cache of job results (we don't re-run jobs twice inside a build, even without `snapshot`)
+        - `${jobName}` - file with status code of the job
+
 ## Possible features
 
 - Support stdin? For now redirected from `/dev/null`

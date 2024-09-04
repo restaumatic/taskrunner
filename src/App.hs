@@ -6,10 +6,10 @@ import Universum
 
 import System.Environment (setEnv, lookupEnv, getEnvironment)
 import System.Process (createProcess_, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe,  readCreateProcess, withCreateProcess)
-import System.IO (openBinaryFile, hSetBuffering, BufferMode (LineBuffering) )
+import System.IO (openBinaryFile, hSetBuffering, BufferMode (LineBuffering),  )
 import qualified System.FilePath as FilePath
 import System.FilePath ((</>))
-import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory)
+import System.Directory ( createDirectoryIfMissing, doesFileExist, getCurrentDirectory, createDirectory )
 import qualified Data.ByteString.Char8 as B8
 import Control.Concurrent.Async (async, wait, cancel)
 import Control.Exception.Base (handle, throwIO)
@@ -38,6 +38,8 @@ import RemoteCache (getLatestBuildHash)
 import CommitStatus (updateCommitStatus, StatusRequest (..))
 import qualified System.Process as Process
 import Control.Monad.EarlyReturn (withEarlyReturn, earlyReturn)
+import Data.Time.Format.ISO8601 (iso8601Show)
+import Data.Time.Clock (getCurrentTime)
 
 getSettings :: IO Settings
 getSettings = do
@@ -70,19 +72,31 @@ main = do
   args <- getCliArgs
   settings <- getSettings
 
-  -- TODO: better inference
   let jobName = fromMaybe (FilePath.takeFileName args.cmd) args.name
+
+  (buildId, isToplevel) <- getBuildIdAndToplevel
 
   let lockFileName = settings.stateDirectory </> "locks" </> (jobName <> ".lock")
 
   createDirectoryIfMissing True (settings.stateDirectory </> "locks")
   createDirectoryIfMissing True (settings.stateDirectory </> "hash")
+  createDirectoryIfMissing True (settings.stateDirectory </> "builds")
+
+  let buildDir = settings.stateDirectory </> "builds" </> toString buildId
+
+  when isToplevel do
+    createDirectory buildDir
+    createDirectory (buildDir </> "logs")
+    createDirectory (buildDir </> "results")
 
   withFileLock lockFileName Exclusive \_ -> do
-    createDirectoryIfMissing True (settings.stateDirectory </> "logs")
+    whenJustM (readResultFile buildDir jobName) \exitCode -> do
+      when settings.debug do
+        hPutStrLn stderr $ "Task " <> jobName <> " already finished in this build with " <> show exitCode
+      exitWith exitCode
 
     -- Lock (take) it while writing a line to either `logFile` or stdout
-    logFile <- openBinaryFile (logFileName settings jobName) WriteMode
+    logFile <- openBinaryFile (logFileName settings buildId jobName) WriteMode
     hSetBuffering logFile LineBuffering
 
     devnull <- openBinaryFile "/dev/null" ReadMode
@@ -99,13 +113,14 @@ main = do
     parentEnv <- getEnvironment
     (stderrPipe, subprocessStderr) <- createPipe
 
-    appState <- AppState settings jobName <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
+    appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
 
     cmdHandler <- async $ commandHandler appState requestPipeRead responsePipeWrite
 
     cwd <- getCurrentDirectory
 
     logDebug appState $ "Running command: " <> show (args.cmd : args.args)
+    logDebug appState $ "  buildId: " <> show buildId
     logDebug appState $ "  cwd: " <> show cwd
     logDebug appState $ "  settings: " <> show settings
 
@@ -130,6 +145,8 @@ main = do
     skipped <- readIORef appState.skipped
 
     logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
+
+    writeFile (buildDir </> "results" </> jobName) (show (exitCodeToInt exitCode))
 
     let isSuccess = exitCode == ExitSuccess
     m_snapshotArgs <- readIORef appState.snapshotArgsRef
@@ -180,6 +197,39 @@ main = do
         }
 
     exitWith exitCode
+
+readResultFile :: FilePath -> JobName -> IO (Maybe ExitCode)
+readResultFile buildDir jobName = do
+  m_contents <- readFileIfExists (buildDir </> "results" </> jobName)
+  case m_contents of
+    Nothing ->
+      pure Nothing
+    Just s ->
+      pure $ intToExitCode <$> (readMaybe s :: Maybe Int)
+
+intToExitCode :: Int -> ExitCode
+intToExitCode 0 = ExitSuccess
+intToExitCode n = ExitFailure n
+
+exitCodeToInt :: ExitCode -> Int
+exitCodeToInt ExitSuccess = 0
+exitCodeToInt (ExitFailure n) = n
+
+getBuildIdAndToplevel :: IO (Text, Bool)
+getBuildIdAndToplevel = do
+  let envName = "_taskrunner_build_id"
+  envValue <- lookupEnv envName
+  case envValue of
+    Nothing -> do
+      -- We are the top level.
+      buildId <- newBuildId
+      setEnv envName (toString buildId)
+      pure (buildId, True)
+    Just value ->
+      pure (toText value, False)
+
+newBuildId :: IO Text
+newBuildId = toText . iso8601Show <$> getCurrentTime
 
 runPostUnpackCmd :: AppState -> String -> IO ()
 runPostUnpackCmd appState cmd = do

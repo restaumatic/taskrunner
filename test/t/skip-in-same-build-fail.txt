@@ -1,0 +1,11 @@
+# Within one build we don't run a task twice.
+
+go() {
+  taskrunner -n foo sh -c '
+    echo "Executing"
+    exit 1
+  '
+}
+
+go || echo "failed 1"
+go || echo "failed 2" # should not run again, should return failure status

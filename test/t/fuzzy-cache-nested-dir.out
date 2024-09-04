@@ -1,0 +1,12 @@
+-- output:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation, no previous output
+[mytask] info | success
+Output in a is: oof
+Output2 in a is: oof
+[mytask] info | Inputs changed, running task
+[mytask] info | Restored fuzzy cache from branch master, hash=c6621d9fa9e14eff5f583847f3d3463767c6c082
+[mytask] stdout | Expensive computation, previous output is oof
+[mytask] info | success
+Output in b is: rab
+Output2 in b is: rab

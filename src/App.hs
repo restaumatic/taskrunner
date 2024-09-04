@@ -444,7 +444,9 @@ tryRestoreFuzzyCache appState args = do
         Nothing ->
           go xs
         Just hash -> do
-          success <- RemoteCache.restoreCache appState s (fromMaybe "." args.cacheRoot) (archiveName appState args hash) RemoteCache.NoLog
+          success <- RemoteCache.restoreCache appState s
+              (fromMaybe appState.settings.rootDirectory args.cacheRoot)
+              (archiveName appState args hash) RemoteCache.NoLog
           if success then
             logInfo appState $ "Restored fuzzy cache from branch " <> branch <> ", hash=" <> hash
           else

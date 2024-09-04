@@ -6,7 +6,7 @@ import Universum
 
 import System.Environment (setEnv, lookupEnv, getEnvironment)
 import System.Process (createProcess_, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe,  readCreateProcess, withCreateProcess)
-import System.IO (openBinaryFile, hSetBuffering, BufferMode (LineBuffering),  )
+import System.IO (openBinaryFile, hSetBuffering, BufferMode (..),  )
 import qualified System.FilePath as FilePath
 import System.FilePath ((</>))
 import System.Directory ( createDirectoryIfMissing, doesFileExist, getCurrentDirectory, createDirectory )
@@ -40,6 +40,7 @@ import qualified System.Process as Process
 import Control.Monad.EarlyReturn (withEarlyReturn, earlyReturn)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import Data.Time.Clock (getCurrentTime)
+import System.IO (hFlush)
 import qualified Data.ByteString.Lazy.Char8 as BL8
 
 getSettings :: IO Settings
@@ -218,13 +219,18 @@ getParentRequestPipe = do
           bail $ "Invalid file descriptor " <> show value <> " in " <> envName
         Just fd -> do
           h <- fdToHandle fd
-          hSetBuffering h LineBuffering
+          -- Note: LineBuffering seems to output the newline as a separate write (!)
+          -- which breaks stuff because we can get two commands from parallel jobs on the same line
+          -- TODO: instead of relying on atomic writes, lock the pipe or something during a request
+          hSetBuffering h (BlockBuffering Nothing)
           pure (Just h)
 
 -- | Issue a debug message to the parent task's log (if there is a parent).
 logDebugParent :: Maybe Handle -> Text -> IO ()
 logDebugParent Nothing _ = pure ()
-logDebugParent (Just h) msg = BL8.hPutStrLn h $ Aeson.encode ["debug", msg]
+logDebugParent (Just h) msg = do
+  BL8.hPutStrLn h $ Aeson.encode ["debug", msg]
+  hFlush h
 
 readResultFile :: FilePath -> JobName -> IO (Maybe ExitCode)
 readResultFile buildDir jobName = do

@@ -1,2 +1,4 @@
 -- output:
+[mytask] info | Inputs changed, running task
 [mytask] stdout | Expensive computation
+[mytask] info | success

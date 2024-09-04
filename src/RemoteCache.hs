@@ -26,7 +26,7 @@ import Network.URI (parseURI, URI (..), URIAuth(..))
 import System.Directory (makeAbsolute, canonicalizePath)
 import System.FilePath (makeRelative)
 import qualified System.FilePath as FP
-import Utils (bail, logDebug, logFileName)
+import Utils (bail, logDebug, logFileName, logInfo)
 import qualified Amazonka as AWS
 import Control.Exception.Lens (handling)
 import System.Exit (ExitCode(..))
@@ -158,13 +158,16 @@ saveCache appState settings relativeCacheRoot files archiveName = do
             liftIO $ logDebug appState "Upload success"
             pure ()
 
+data LogMode = NoLog | Log deriving (Eq, Show)
+
 restoreCache
   :: AppState
   -> RemoteCacheSettings
   -> FilePath -- ^ Cache root (can be outside rootDirectory)
   -> Text -- Archive name
+  -> LogMode
   -> IO Bool
-restoreCache appState settings cacheRoot archiveName = do
+restoreCache appState settings cacheRoot archiveName logMode = do
   env <- newAwsEnv appState settings
   let bucket = settings.remoteCacheBucket
   let objectKey = settings.remoteCachePrefix <> "bundles/" <> archiveName
@@ -178,8 +181,9 @@ restoreCache appState settings cacheRoot archiveName = do
 
   handling _NoSuchKey onNoSuchKey $ runConduitRes do
     response <- AWS.send env $ newGetObject (BucketName bucket) (ObjectKey objectKey)
+    when (logMode == Log) do
+      liftIO $ logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
     response.body.body
-    --      .| Zstd.decompress
           .| unpackTar appState cacheRoot
     pure True
 

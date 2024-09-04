@@ -28,14 +28,24 @@ outputLine appState toplevelOutput streamName line = do
     logClosed <- hIsClosed appState.logOutput
     unless logClosed do
       B8.hPutStrLn appState.logOutput $ timestampStr <> streamName <> " | " <> line
-    B8.hPutStrLn toplevelOutput $ timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
+
+    let shouldOutputToToplevel
+          | streamName == "debug" = appState.settings.logDebug
+          | streamName == "info" = appState.settings.logInfo
+          | otherwise = True
+
+    when shouldOutputToToplevel do
+      B8.hPutStrLn toplevelOutput $ timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
 
 logLevel :: MonadIO m => ByteString -> AppState -> Text -> m ()
 logLevel level appState msg =
   liftIO $ forM_ (lines msg) $ outputLine appState appState.toplevelStderr level . encodeUtf8
 
 logDebug :: MonadIO m => AppState -> Text -> m ()
-logDebug appState msg = when appState.settings.debug $ logLevel "debug" appState msg
+logDebug = logLevel "debug"
+
+logInfo :: MonadIO m => AppState -> Text -> m ()
+logInfo = logLevel "info"
 
 logError :: MonadIO m => AppState -> Text -> m ()
 logError = logLevel "error"

@@ -1,9 +1,12 @@
 -- output:
+[mytask] info | Inputs changed, running task
 [mytask] stdout | Expensive computation
+[mytask] info | success
 [mytask] stderr | post-unpack stdout
 [mytask] stderr | post-unpack stderr
 Output in a is: oof
 Output2 in a is: oof
+[mytask] info | Restored from remote cache
 [mytask] stderr | post-unpack stdout
 [mytask] stderr | post-unpack stderr
 Output in b is: oof

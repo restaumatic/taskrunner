@@ -70,6 +70,7 @@ runTest source = do
             ([ ("TASKRUNNER_STATE_DIRECTORY", dir)
               , ("TASKRUNNER_DISABLE_TIMESTAMPS", "1")
               , ("TASKRUNNER_OUTPUT_STREAM_TIMEOUT", "1")
+              , ("TASKRUNNER_LOG_INFO", "1")
               , ("PATH", path)
               ] <> s3ExtraEnv)
             , cwd = Just dir

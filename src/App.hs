@@ -6,7 +6,8 @@ import Universum
 
 import System.Environment (setEnv, lookupEnv, getEnvironment)
 import System.Process (createProcess_, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe,  readCreateProcess, withCreateProcess)
-import System.IO (openBinaryFile, hSetBuffering, BufferMode (..),  )
+import System.IO
+    ( openBinaryFile, hSetBuffering, BufferMode(..), hFlush )
 import qualified System.FilePath as FilePath
 import System.FilePath ((</>))
 import System.Directory ( createDirectoryIfMissing, doesFileExist, getCurrentDirectory, createDirectory )
@@ -40,7 +41,6 @@ import qualified System.Process as Process
 import Control.Monad.EarlyReturn (withEarlyReturn, earlyReturn)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import Data.Time.Clock (getCurrentTime)
-import System.IO (hFlush)
 import qualified Data.ByteString.Lazy.Char8 as BL8
 
 getSettings :: IO Settings
@@ -49,7 +49,8 @@ getSettings = do
   cwd <- getCurrentDirectory
   rootDirectory <- fromMaybe cwd <$> lookupEnv "TASKRUNNER_ROOT_DIRECTORY"
   timestamps <- (/=Just "1") <$> lookupEnv "TASKRUNNER_DISABLE_TIMESTAMPS"
-  debug <- (==Just "1") <$> lookupEnv "TASKRUNNER_DEBUG"
+  logDebug_ <- (==Just "1") <$> lookupEnv "TASKRUNNER_DEBUG"
+  logInfo_ <- (==Just "1") <$> lookupEnv "TASKRUNNER_LOG_INFO"
   outputStreamTimeout <- maybe 5 read <$> lookupEnv "TASKRUNNER_OUTPUT_STREAM_TIMEOUT"
   saveRemoteCache <- (==Just "1") <$> lookupEnv "TASKRUNNER_SAVE_REMOTE_CACHE"
   enableCommitStatus <- (==Just "1") <$> lookupEnv "TASKRUNNER_ENABLE_COMMIT_STATUS"
@@ -60,7 +61,8 @@ getSettings = do
         { stateDirectory
         , rootDirectory
         , timestamps
-        , debug
+        , logDebug = logDebug_
+        , logInfo = logInfo_
         , outputStreamTimeout
         , saveRemoteCache
         , enableCommitStatus
@@ -98,8 +100,6 @@ main = do
   withFileLock lockFileName Exclusive \_ -> do
     whenJustM (readResultFile buildDir jobName) \exitCode -> do
       logDebugParent m_parentRequestPipe $ "Subtask " <> toText jobName <> " finished with " <> show exitCode
-      when settings.debug do
-        hPutStrLn stderr $ "Task " <> jobName <> " already finished in this build with " <> show exitCode
       exitWith exitCode
 
     -- Lock (take) it while writing a line to either `logFile` or stdout
@@ -153,6 +153,15 @@ main = do
 
     logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
     logDebugParent m_parentRequestPipe $ "Subtask " <> toText jobName <> " finished with " <> show exitCode
+
+    m_hashToSave <- readIORef appState.hashToSaveRef
+
+    -- Only be chatty about exit status if we were chatty about starting the work, i.e. if it is cacheable.
+    when (not skipped && isJust m_hashToSave) do
+      if exitCode == ExitSuccess then
+        logInfo appState "success"
+      else
+        logError appState $ "Failed, exit code: " <> show (exitCodeToInt exitCode)
 
     writeFile (buildDir </> "results" </> jobName) (show (exitCodeToInt exitCode))
 
@@ -397,14 +406,15 @@ snapshot appState args = do
 
     when (hasOutputs args) do
       s <- RemoteCache.getRemoteCacheSettingsFromEnv
-      success <- liftIO $ RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash)
+      success <- liftIO $ RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash) RemoteCache.NoLog
       when success do
         writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
-        logDebug appState "Remote cache found, skipping"
+        logInfo appState "Restored from remote cache"
         earlyReturn (False, Just "cache hit")
 
-    logDebug appState "Neither local nor remote cache found, running task"
     writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
+
+    logInfo appState "Inputs changed, running task"
 
     when (hasOutputs args && args.fuzzyCache) do
       tryRestoreFuzzyCache appState args
@@ -434,9 +444,9 @@ tryRestoreFuzzyCache appState args = do
         Nothing ->
           go xs
         Just hash -> do
-          success <- RemoteCache.restoreCache appState s (fromMaybe "." args.cacheRoot) (archiveName appState args hash)
+          success <- RemoteCache.restoreCache appState s (fromMaybe "." args.cacheRoot) (archiveName appState args hash) RemoteCache.NoLog
           if success then
-            logDebug appState $ "Restored fuzzy cache from branch " <> branch <> ", hash=" <> hash
+            logInfo appState $ "Restored fuzzy cache from branch " <> branch <> ", hash=" <> hash
           else
             go xs
 

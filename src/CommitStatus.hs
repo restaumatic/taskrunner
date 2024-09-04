@@ -77,7 +77,7 @@ updateCommitStatus appState statusRequest = liftIO do
       logError appState $ "CommitStatus: Response: " <> decodeUtf8 response.responseBody
       exitFailure
     Right tokenResponse -> do
-      let accessToken = token tokenResponse
+      let accessToken = tokenResponse.token
 
       -- Prepare the status update request
       let statusUrl = "https://api.github.com/repos/" ++ owner ++ "/" ++ repo ++ "/statuses/" ++ toString sha

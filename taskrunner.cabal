@@ -73,6 +73,7 @@ library
       DeriveTraversable
       DeriveFoldable
       TypeOperators
+      NoFieldSelectors
   ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints -O
   build-depends:
       Glob
@@ -158,6 +159,7 @@ executable taskrunner
       DeriveTraversable
       DeriveFoldable
       TypeOperators
+      NoFieldSelectors
   ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints -threaded -O
   build-depends:
       Glob
@@ -245,6 +247,7 @@ test-suite taskrunner-test
       DeriveTraversable
       DeriveFoldable
       TypeOperators
+      NoFieldSelectors
   ghc-options: -Wall -Wcompat -Widentities -Werror=incomplete-record-updates -Werror=incomplete-uni-patterns -Wmissing-home-modules -Werror=partial-fields -Wredundant-constraints -threaded
   build-depends:
       Glob

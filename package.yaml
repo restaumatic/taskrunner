@@ -94,6 +94,7 @@ default-extensions:
   - DeriveTraversable
   - DeriveFoldable
   - TypeOperators
+  - NoFieldSelectors
 
 ghc-options:
 - -Wall

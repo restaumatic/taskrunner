@@ -7,7 +7,8 @@ data Settings = Settings
   { stateDirectory :: FilePath
   , rootDirectory :: FilePath
   , timestamps :: Bool
-  , debug :: Bool
+  , logDebug :: Bool
+  , logInfo :: Bool
   , outputStreamTimeout :: Int
   , saveRemoteCache :: Bool
   , enableCommitStatus :: Bool

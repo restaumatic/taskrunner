@@ -1,0 +1,93 @@
+# no toplevel
+# s3
+
+# We only download fuzzy cache if the _main branch commit_ changed since the last build.
+# Why? In development, we don't want fuzzy cache to overwrite what we'we locally built.
+# However, sometimes it's beneficial to incorporate upstream changes. A good approximation is:
+# incorporate upstream changes when we get new commits on the main branch
+# (assuming we're using a feature-branch workflow).
+
+export TASKRUNNER_SAVE_REMOTE_CACHE=1
+export TASKRUNNER_FALLBACK_BRANCHES="main"
+export TASKRUNNER_MAIN_BRANCH="main"
+
+git --bare init -q -b main upstream.git
+
+mkdir a
+
+(
+  cd a
+  echo foo > input.txt
+  git init -q -b main
+  git add input.txt
+  git commit -q -m "commit1"
+  
+  git remote add origin ../upstream.git
+  git push -q origin main
+)
+
+cp -r a b
+
+go() {
+  # Note: we want separate workdir for separate repos
+  TASKRUNNER_STATE_DIRECTORY="$(pwd)" taskrunner -n mytask bash -e -c '
+    snapshot input.txt --outputs output.txt --fuzzy-cache 
+    echo -n "Expensive computation, "
+    if [ -f output.txt ]; then
+      echo "previous output is $(cat output.txt)"
+    else
+      echo "no previous output"
+    fi
+    rev input.txt > output.txt
+  '
+}
+
+(
+  cd a
+  go
+  echo "Output in a is: $(cat output.txt)"
+)
+
+(
+  echo "*** 'bar' in b, should get fuzzy cache:"
+  cd b
+  export TASKRUNNER_SAVE_REMOTE_CACHE=0
+  git checkout -b feature
+  echo bar > input.txt
+  go
+  echo "Output in b is: $(cat output.txt)"
+  git commit -q -m bar input.txt
+)
+
+(
+  echo "*** 'baz' in b, should NOT get fuzzy cache:"
+  cd b
+  export TASKRUNNER_SAVE_REMOTE_CACHE=0
+  echo baz > input.txt
+  go
+  echo "Output in b is: $(cat output.txt)"
+  git commit -q -m bar input.txt
+)
+
+(
+  echo "*** 'qux' in a, should upload cache"
+  cd a
+  echo qux > input.txt
+  go
+  echo "Output in a is: $(cat output.txt)"
+  git commit -q -m qux input.txt
+  git push -q origin main
+)
+
+(
+  echo "*** merging and 'fud' in b, should get fuzzy cache"
+  cd b
+  git fetch -q origin main
+  git merge -q -s ours origin/main
+
+  export TASKRUNNER_SAVE_REMOTE_CACHE=0
+  echo fud > input.txt
+  go
+  echo "Output in b is: $(cat output.txt)"
+  git commit -q -m bar input.txt
+)

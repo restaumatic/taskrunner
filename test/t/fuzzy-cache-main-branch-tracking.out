@@ -1,0 +1,28 @@
+-- output:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation, no previous output
+[mytask] info | success
+Output in a is: oof
+*** 'bar' in b, should get fuzzy cache:
+Switched to a new branch 'feature'
+[mytask] info | Inputs changed, running task
+[mytask] info | Restored fuzzy cache from branch main, hash=6b36308659163b577fd1c832107dc46ca3aa659b
+[mytask] stdout | Expensive computation, previous output is oof
+[mytask] info | success
+Output in b is: rab
+*** 'baz' in b, should NOT get fuzzy cache:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation, previous output is rab
+[mytask] info | success
+Output in b is: zab
+*** 'qux' in a, should upload cache
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation, previous output is oof
+[mytask] info | success
+Output in a is: xuq
+*** merging and 'fud' in b, should get fuzzy cache
+[mytask] info | Inputs changed, running task
+[mytask] info | Restored fuzzy cache from branch main, hash=22633d092c45c4ee1e6ca68e21dc09bdc038c0c8
+[mytask] stdout | Expensive computation, previous output is xuq
+[mytask] info | success
+Output in b is: duf

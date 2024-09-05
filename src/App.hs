@@ -57,6 +57,7 @@ getSettings = do
   uploadLogs <- (==Just "1") <$> lookupEnv "TASKRUNNER_UPLOAD_LOGS"
   fuzzyCacheFallbackBranches <- maybe [] (Text.words . toText) <$> lookupEnv "TASKRUNNER_FALLBACK_BRANCHES"
   primeCacheMode <- (==Just "1") <$> lookupEnv "TASKRUNNER_PRIME_CACHE_MODE"
+  mainBranch <- map toText <$> lookupEnv "TASKRUNNER_MAIN_BRANCH"
   pure Settings
         { stateDirectory
         , rootDirectory
@@ -69,6 +70,7 @@ getSettings = do
         , uploadLogs
         , fuzzyCacheFallbackBranches
         , primeCacheMode
+        , mainBranch
         }
 
 main :: IO ()
@@ -171,7 +173,7 @@ main = do
     when isSuccess do
       whenJustM (readIORef appState.hashToSaveRef) \h -> do
         logDebug appState $ "Saving hash " <> h.hash <> " to " <> toText (hashFilename appState)
-        Text.writeFile (hashFilename appState) (h.hash <> "\n\n" <> h.hashInput)
+        BL.writeFile (hashFilename appState) (Aeson.encode h)
 
         whenJust m_snapshotArgs \snapshotArgs -> do
           forM_ snapshotArgs.postUnpackCommands \cmd -> do
@@ -391,7 +393,16 @@ snapshot appState args = do
     let currentHashInput = filesHashInput <> rawHashInput
     let currentHash = hexSha1 currentHashInput
 
-    savedHash <- Text.takeWhile (/= '\n') . fromMaybe "none" <$> readFileIfExists (hashFilename appState)
+    mainBranchCommit <- liftIO $ getMainBranchCommit appState
+
+    let hashInfo = HashInfo
+          { hash = currentHash
+          , hashInput = currentHashInput
+          , mainBranchCommit
+          }
+
+    savedHashInfo <- liftIO $ readHashInfo appState
+    let savedHash = savedHashInfo.hash
 
     when (currentHash == savedHash) do
       logDebug appState $ "Hash matches, hash=" <> savedHash <> ", skipping"
@@ -399,24 +410,22 @@ snapshot appState args = do
 
     logDebug appState $ "Hash mismatch, saved=" <>  savedHash <> ", current=" <>  currentHash
 
+    writeIORef appState.hashToSaveRef $ Just hashInfo
+
     when appState.settings.primeCacheMode do
       logDebug appState "Prime cache mode, assuming task is done and skippping!"
-      writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
       earlyReturn (False, Nothing)
 
     when (hasOutputs args) do
       s <- RemoteCache.getRemoteCacheSettingsFromEnv
       success <- liftIO $ RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash) RemoteCache.Log
       when success do
-        writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
         logInfo appState "Restored from remote cache"
         earlyReturn (False, Just "cache hit")
 
-    writeIORef appState.hashToSaveRef $ Just $ HashInfo currentHash currentHashInput
-
     logInfo appState "Inputs changed, running task"
 
-    when (hasOutputs args && args.fuzzyCache) do
+    when (hasOutputs args && args.fuzzyCache && mainBranchCommitChanged savedHashInfo hashInfo) do
       tryRestoreFuzzyCache appState args
 
     pure (True, Nothing)
@@ -432,6 +441,29 @@ snapshot appState args = do
   writeIORef appState.skipped (not runTask)
 
   pure $ if runTask then "true" else "exit 0"
+
+-- | Check if mainBranchCommitChanged vs a previous HashInfo.
+-- However, if we don't track the main branch at all (i.e. mainBranchCommit is Nothing),
+-- then we always consider it changed.
+mainBranchCommitChanged :: HashInfo -> HashInfo -> Bool
+mainBranchCommitChanged oldHI newHI =
+  isNothing oldHI.mainBranchCommit || oldHI.mainBranchCommit /= newHI.mainBranchCommit
+
+readHashInfo :: AppState -> IO HashInfo
+readHashInfo appState = do
+  let fp = hashFilename appState
+  exists <- doesFileExist fp
+  if exists then do
+    x <- Aeson.eitherDecodeFileStrict fp
+    case x of
+      Left _ -> do
+        logDebug appState $ "Invalid HashInfo in hash file " <> toText fp
+        pure emptyHashInfo
+      Right h ->
+        pure h
+  else
+    pure emptyHashInfo
+      
 
 tryRestoreFuzzyCache :: MonadIO m => AppState -> SnapshotCliArgs -> m ()
 tryRestoreFuzzyCache appState args = do

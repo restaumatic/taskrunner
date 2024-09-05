@@ -84,6 +84,17 @@ getCurrentBranch appState =
       (proc "git" ["symbolic-ref", "--short", "HEAD"]) { std_err = UseHandle stderr_ }
        ""
 
+getMainBranchCommit :: AppState -> IO (Maybe Text)
+getMainBranchCommit appState =
+  case appState.settings.mainBranch of
+    Nothing ->
+      pure Nothing
+    Just branch ->
+      bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
+        Just . Text.strip . Text.pack <$> readCreateProcess
+          (proc "git" ["merge-base", "HEAD", "origin/" <> toString branch]) { std_err = UseHandle stderr_ }
+           ""
+
 getCurrentCommit :: AppState -> IO Text
 getCurrentCommit _appState =
   -- TODO: fix: we can't use subprocessStderr here because it's used after closing output collector

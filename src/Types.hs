@@ -2,6 +2,7 @@ module Types where
 
 import Universum
 import SnapshotCliArgs (SnapshotCliArgs)
+import Data.Aeson (FromJSON, ToJSON)
 
 data Settings = Settings
   { stateDirectory :: FilePath
@@ -15,6 +16,7 @@ data Settings = Settings
   , uploadLogs :: Bool
   , fuzzyCacheFallbackBranches :: [Text]
   , primeCacheMode :: Bool
+  , mainBranch :: Maybe Text
   } deriving (Show)
 
 type JobName = String
@@ -22,6 +24,14 @@ type JobName = String
 data HashInfo = HashInfo
   { hash :: Text
   , hashInput :: Text
+  , mainBranchCommit :: Maybe Text
+  } deriving (Show, Generic, FromJSON, ToJSON)
+
+emptyHashInfo :: HashInfo
+emptyHashInfo = HashInfo
+  { hash = ""
+  , hashInput = ""
+  , mainBranchCommit = Nothing
   }
 
 type BuildId = Text

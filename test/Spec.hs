@@ -1,7 +1,7 @@
 import Universum
 
 import Test.Tasty (defaultMain, TestTree, testGroup)
-import Test.Tasty.Golden (goldenVsString, findByExtension)
+import Test.Tasty.Golden (findByExtension, goldenVsStringDiff)
 import qualified Data.ByteString.Lazy as LBS
 import System.FilePath (takeBaseName, replaceExtension)
 import System.Process (proc, createPipe, CreateProcess (..), StdStream (..), withCreateProcess, waitForProcess)
@@ -35,8 +35,9 @@ goldenTests = do
         | skipSlow = filter (\filename -> not ("/slow/" `isInfixOf` filename)) inputFiles0
         | otherwise = inputFiles0
   return $ testGroup "tests"
-    [ goldenVsString
+    [ goldenVsStringDiff
         (takeBaseName inputFile) -- test name
+        (\ref new -> ["diff", "-u", ref, new])
         outputFile -- golden file path
         (System.IO.readFile inputFile >>= runTest) -- action whose result is tested
     | inputFile <- inputFiles
@@ -71,6 +72,11 @@ runTest source = do
               , ("TASKRUNNER_DISABLE_TIMESTAMPS", "1")
               , ("TASKRUNNER_OUTPUT_STREAM_TIMEOUT", "1")
               , ("TASKRUNNER_LOG_INFO", "1")
+              -- For creating Git commits
+              , ("GIT_AUTHOR_NAME", "test")
+              , ("GIT_AUTHOR_EMAIL", "test@example.com")
+              , ("GIT_COMMITTER_NAME", "test")
+              , ("GIT_COMMITTER_EMAIL", "test@example.com")
               , ("PATH", path)
               ] <> s3ExtraEnv)
             , cwd = Just dir

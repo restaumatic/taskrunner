@@ -1,0 +1,11 @@
+-- output:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation, input is: lol
+[mytask] info | success
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation, input is: I am changed now
+[mytask] info | success
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation, input is: lol
+[mytask] info | success
+This should be LOL: LOL

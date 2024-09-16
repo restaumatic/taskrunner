@@ -17,6 +17,7 @@ data Settings = Settings
   , fuzzyCacheFallbackBranches :: [Text]
   , primeCacheMode :: Bool
   , mainBranch :: Maybe Text
+  , force :: Bool
   } deriving (Show)
 
 type JobName = String

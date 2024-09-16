@@ -1,8 +1,10 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 
 module App where
 
-import Universum
+import Universum hiding (force)
 
 import System.Environment (setEnv, lookupEnv, getEnvironment)
 import System.Process (createProcess_, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe,  readCreateProcess, withCreateProcess)
@@ -71,12 +73,15 @@ getSettings = do
         , fuzzyCacheFallbackBranches
         , primeCacheMode
         , mainBranch
+        , force = False
         }
 
 main :: IO ()
 main = do
-  args <- getCliArgs
-  settings <- getSettings
+  (args :: CliArgs) <- getCliArgs
+  settings' <- getSettings
+  let f = args.force
+  let settings = (settings' :: Settings) { force = f }
 
   let jobName = fromMaybe (FilePath.takeFileName args.cmd) args.name
 
@@ -394,6 +399,7 @@ snapshot appState args = do
     let currentHash = hexSha1 currentHashInput
 
     mainBranchCommit <- liftIO $ getMainBranchCommit appState
+    let force = appState.settings.force
 
     let hashInfo = HashInfo
           { hash = currentHash
@@ -404,7 +410,7 @@ snapshot appState args = do
     savedHashInfo <- liftIO $ readHashInfo appState
     let savedHash = savedHashInfo.hash
 
-    when (currentHash == savedHash) do
+    when (currentHash == savedHash && not force) do
       logDebug appState $ "Hash matches, hash=" <> savedHash <> ", skipping"
       earlyReturn (False, Just "local cache hit (?)")
 
@@ -416,7 +422,8 @@ snapshot appState args = do
       logDebug appState "Prime cache mode, assuming task is done and skippping!"
       earlyReturn (False, Nothing)
 
-    when (hasOutputs args) do
+
+    when (hasOutputs args && not force) do
       s <- RemoteCache.getRemoteCacheSettingsFromEnv
       success <- liftIO $ RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash) RemoteCache.Log
       when success do
@@ -425,7 +432,7 @@ snapshot appState args = do
 
     logInfo appState "Inputs changed, running task"
 
-    when (hasOutputs args && args.fuzzyCache && mainBranchCommitChanged savedHashInfo hashInfo) do
+    when (not force && hasOutputs args && args.fuzzyCache && mainBranchCommitChanged savedHashInfo hashInfo) do
       tryRestoreFuzzyCache appState args
 
     pure (True, Nothing)
@@ -463,7 +470,7 @@ readHashInfo appState = do
         pure h
   else
     pure emptyHashInfo
-      
+
 
 tryRestoreFuzzyCache :: MonadIO m => AppState -> SnapshotCliArgs -> m ()
 tryRestoreFuzzyCache appState args = do

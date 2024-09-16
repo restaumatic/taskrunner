@@ -5,6 +5,7 @@ import Options.Applicative
 
 data CliArgs = CliArgs
     { name :: Maybe String  -- Optional name argument
+    , force :: Bool -- Skip cache
     , cmd  :: String        -- The command to run
     , args :: [String]      -- List of arguments for the command
     } deriving (Show)
@@ -16,6 +17,10 @@ commandParser = CliArgs
        <> short 'n'
        <> metavar "NAME"
        <> help "Optional name for the task" ))
+    <*> switch
+        ( long "force"
+       <> short 'f'
+       <> help "Skip cache and fuzzy cache" )
     <*> argument str
         ( metavar "CMD"
        <> help "The command to run" )

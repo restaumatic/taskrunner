@@ -1,0 +1,10 @@
+-- output:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation
+[mytask] info | success
+Output in a is: oof
+Should compute again:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation
+[mytask] info | success
+Output in b is: oof

@@ -1,0 +1,25 @@
+# no toplevel
+
+echo lol > input.txt
+git init -q
+git add input.txt
+
+go() {
+  taskrunner -n mytask "$@" bash -e -c '
+    snapshot input.txt
+    echo "Expensive computation, input is: $(cat input.txt)"
+    tr a-z A-Z < input.txt > output.txt
+  '
+}
+
+go
+
+echo "I am changed now" > input.txt
+go --force
+
+# Going back to original input should result in re-running!
+echo lol > input.txt
+go
+
+# TODO: switch to actual assertions for cases like this
+echo "This should be LOL: $(cat output.txt)"

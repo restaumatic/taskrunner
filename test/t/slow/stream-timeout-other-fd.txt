@@ -1,0 +1,5 @@
+# This tests that we do allow background processes, provided they don't inherid stdin/out/err.
+# Essentally this checks whether we leak the stdout/err pipes in other file descrpitors.
+
+sleep 2 </dev/null >/dev/null 2>/dev/null &
+disown

@@ -1,0 +1,66 @@
+# no toplevel
+# s3
+
+# When a task fails, we don't want to redownload the same fuzzy cache again,
+# because it might clobber incremental compilation results.
+
+export TASKRUNNER_SAVE_REMOTE_CACHE=1
+export TASKRUNNER_FALLBACK_BRANCHES="main"
+export TASKRUNNER_MAIN_BRANCH="main"
+
+git --bare init -q -b main upstream.git
+
+mkdir a
+
+(
+  cd a
+  echo foo > input.txt
+  git init -q -b main
+  git add input.txt
+  git commit -q -m "commit1"
+  
+  git remote add origin ../upstream.git
+  git push -q origin main
+)
+
+cp -r a b
+
+go() {
+  # Note: we want separate workdir for separate repos
+  TASKRUNNER_STATE_DIRECTORY="$(pwd)" taskrunner -n mytask bash -e -c '
+    snapshot input.txt --outputs output.txt --fuzzy-cache 
+    echo -n "Expensive computation, "
+    if [ -f output.txt ]; then
+      echo "previous output is $(cat output.txt)"
+    else
+      echo "no previous output"
+    fi
+    rev input.txt > output.txt
+    if [ "${FAIL:-}" = 1 ]; then exit 1; fi
+  '
+}
+
+(
+  cd a
+  go
+  echo "Output in a is: $(cat output.txt)"
+)
+
+(
+  echo "*** 'bar' in b, should get fuzzy cache but fails:"
+  cd b
+  export TASKRUNNER_SAVE_REMOTE_CACHE=0
+  git checkout -b feature
+  echo bar > input.txt
+  FAIL=1 go || echo "Failed as it should"
+  echo "Output in b is: $(cat output.txt)"
+)
+
+(
+  echo "*** 'baz' in b, should NOT get fuzzy cache:"
+  cd b
+  echo baz > input.txt
+  export TASKRUNNER_SAVE_REMOTE_CACHE=0
+  go
+  echo "Output in b is: $(cat output.txt)"
+)

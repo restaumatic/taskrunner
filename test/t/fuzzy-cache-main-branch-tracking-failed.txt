@@ -1,8 +1,10 @@
 # no toplevel
 # s3
 
-# When a task fails, we don't want to redownload the same fuzzy cache again,
-# because it might clobber incremental compilation results.
+cat <<EOF
+When a task fails, we don't want to redownload the same fuzzy cache again,
+because it might clobber incremental compilation results.
+EOF
 
 export TASKRUNNER_SAVE_REMOTE_CACHE=1
 export TASKRUNNER_FALLBACK_BRANCHES="main"
@@ -47,7 +49,7 @@ go() {
 )
 
 (
-  echo "*** 'bar' in b, should get fuzzy cache but fails:"
+  echo "*** 'bar' in b, should get fuzzy cache and fail:"
   cd b
   export TASKRUNNER_SAVE_REMOTE_CACHE=0
   git checkout -b feature

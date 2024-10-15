@@ -1,9 +1,11 @@
 -- output:
+When a task fails, we don't want to redownload the same fuzzy cache again,
+because it might clobber incremental compilation results.
 [mytask] info | Inputs changed, running task
 [mytask] stdout | Expensive computation, no previous output
 [mytask] info | success
 Output in a is: oof
-*** 'bar' in b, should get fuzzy cache but fails:
+*** 'bar' in b, should get fuzzy cache and fail:
 Switched to a new branch 'feature'
 [mytask] info | Inputs changed, running task
 [mytask] info | Restored fuzzy cache from branch main, hash=6b36308659163b577fd1c832107dc46ca3aa659b

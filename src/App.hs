@@ -178,7 +178,7 @@ main = do
     when isSuccess do
       whenJustM (readIORef appState.hashToSaveRef) \h -> do
         logDebug appState $ "Saving hash " <> h.hash <> " to " <> toText (hashFilename appState)
-        BL.writeFile (hashFilename appState) (Aeson.encode h)
+        saveHashInfo appState h
 
         whenJust m_snapshotArgs \snapshotArgs -> do
           forM_ snapshotArgs.postUnpackCommands \cmd -> do
@@ -221,6 +221,9 @@ main = do
         }
 
     exitWith exitCode
+
+saveHashInfo :: MonadIO m => AppState -> HashInfo -> m ()
+saveHashInfo appState h = liftIO $ BL.writeFile (hashFilename appState) (Aeson.encode h)
 
 getParentRequestPipe :: IO (Maybe Handle)
 getParentRequestPipe = do
@@ -433,7 +436,12 @@ snapshot appState args = do
     logInfo appState "Inputs changed, running task"
 
     when (not force && hasOutputs args && args.fuzzyCache && mainBranchCommitChanged savedHashInfo hashInfo) do
-      tryRestoreFuzzyCache appState args
+      success <- tryRestoreFuzzyCache appState args
+      when success do
+        -- Save change in mainBranchCommit, even if the task didn't succeed yet.
+        -- Why? Because we want to only restore fuzzy cache once for each main branch change,
+        -- even if the task fails.
+        saveHashInfo appState $ savedHashInfo { mainBranchCommit = hashInfo.mainBranchCommit }
 
     pure (True, Nothing)
 
@@ -472,11 +480,11 @@ readHashInfo appState = do
     pure emptyHashInfo
 
 
-tryRestoreFuzzyCache :: MonadIO m => AppState -> SnapshotCliArgs -> m ()
+tryRestoreFuzzyCache :: MonadIO m => AppState -> SnapshotCliArgs -> m Bool
 tryRestoreFuzzyCache appState args = do
   s <- RemoteCache.getRemoteCacheSettingsFromEnv
   let
-    go [] = pure ()
+    go [] = pure False
     go (branch:xs) = do
       m_latestHash <- getLatestBuildHash appState s (toText appState.jobName) branch
       case m_latestHash of
@@ -486,8 +494,9 @@ tryRestoreFuzzyCache appState args = do
           success <- RemoteCache.restoreCache appState s
               (fromMaybe appState.settings.rootDirectory args.cacheRoot)
               (archiveName appState args hash) RemoteCache.NoLog
-          if success then
+          if success then do
             logInfo appState $ "Restored fuzzy cache from branch " <> branch <> ", hash=" <> hash
+            pure True
           else
             go xs
 

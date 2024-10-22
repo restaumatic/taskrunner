@@ -198,7 +198,9 @@ main = do
 
     timeoutStream appState "stdout" $ wait stdoutHandler
 
-    -- We used `createProcess_`, so we must close it manually
+    -- We duplicate `subprocessStderr` before actually passing it to a
+    -- subprocess, so the original handle doesn't get closed by
+    -- `createProcess`. We must close it manually.
     hClose appState.subprocessStderr
     timeoutStream appState "stderr" $ wait stderrHandler
     timeoutStream appState "stderr" $ wait subprocessStderrHandler

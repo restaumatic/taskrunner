@@ -7,7 +7,7 @@ module App where
 import Universum hiding (force)
 
 import System.Environment (setEnv, lookupEnv, getEnvironment)
-import System.Process (createProcess_, CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe,  readCreateProcess, withCreateProcess)
+import System.Process (CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe,  readCreateProcess, withCreateProcess)
 import System.IO
     ( openBinaryFile, hSetBuffering, BufferMode(..), hFlush )
 import qualified System.FilePath as FilePath
@@ -125,34 +125,37 @@ main = do
     hSetBuffering responsePipeWrite LineBuffering
 
     parentEnv <- getEnvironment
-    (stderrPipe, subprocessStderr) <- createPipe
-
-    appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
-
-    cmdHandler <- async $ commandHandler appState requestPipeRead responsePipeWrite
 
     cwd <- getCurrentDirectory
-
-    logDebug appState $ "Running command: " <> show (args.cmd : args.args)
-    logDebug appState $ "  buildId: " <> show buildId
-    logDebug appState $ "  cwd: " <> show cwd
-    logDebug appState $ "  settings: " <> show settings
 
     -- TODO: handle spawn error here
     -- TODO: should we use withCreateProcess?
     -- TODO: should we use delegate_ctlc or DIY? See https://hackage.haskell.org/package/process-1.6.20.0/docs/System-Process.html#g:4
     -- -> We should DIY because we need to flush stream etc.
-    (Nothing, Just stdoutPipe, Nothing, processHandle) <- createProcess_ "createProcess_"
-      (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe, std_err = UseHandle subprocessStderr,
-        env=Just $ nubOrdOn fst $
+    (Nothing, Just stdoutPipe, Just stderrPipe, processHandle) <- Process.createProcess
+      (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe
+      , std_err = CreatePipe
+      , env=Just $ nubOrdOn fst $
           [ ("BASH_FUNC_snapshot%%", "() {\n" <> $(embedStringFile "src/snapshot.sh") <> "\n}")
           , ("_taskrunner_request_pipe", show requestPipeWriteFd)
           , ("_taskrunner_response_pipe", show responsePipeReadFd)
           ] <> parentEnv
         }
 
+    (subprocessStderrRead, subprocessStderr) <- createPipe
+
+    appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
+
+    logDebug appState $ "Running command: " <> show (args.cmd : args.args)
+    logDebug appState $ "  buildId: " <> show buildId
+    logDebug appState $ "  cwd: " <> show cwd
+    logDebug appState $ "  settings: " <> show settings
+
+    cmdHandler <- async $ commandHandler appState requestPipeRead responsePipeWrite
+
     stdoutHandler <- async $ outputStreamHandler appState toplevelStdout "stdout" stdoutPipe
     stderrHandler <- async $ outputStreamHandler appState toplevelStderr "stderr" stderrPipe
+    subprocessStderrHandler <- async $ outputStreamHandler appState toplevelStderr "stderr" subprocessStderrRead
 
     exitCode <- waitForProcess processHandle
 
@@ -195,9 +198,12 @@ main = do
 
     timeoutStream appState "stdout" $ wait stdoutHandler
 
-    -- We used `createProcess_`, so we must close it manually
+    -- We duplicate `subprocessStderr` before actually passing it to a
+    -- subprocess, so the original handle doesn't get closed by
+    -- `createProcess`. We must close it manually.
     hClose appState.subprocessStderr
     timeoutStream appState "stderr" $ wait stderrHandler
+    timeoutStream appState "stderr" $ wait subprocessStderrHandler
 
     cancel cmdHandler
 

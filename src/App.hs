@@ -330,8 +330,9 @@ timeoutStream :: AppState -> Text -> IO () -> IO ()
 timeoutStream appState streamName action = do
   result <- timeout (appState.settings.outputStreamTimeout * 1000000) action
   when (isNothing result) do
-    logError appState $ "Task did not close " <> streamName <> " " <> show appState.settings.outputStreamTimeout <> " seconds after exiting."
-    logError appState "Perhaps there's a background process?"
+    logWarn appState $ "taskrunner: Task did not close " <> streamName <> " " <> show appState.settings.outputStreamTimeout <> " seconds after exiting."
+    logWarn appState "Perhaps the file descriptor was leaked to a background process?"
+    logWarn appState "Build will continue despite this error, but some output may be lost."
 
     -- Note: this used to be a fatal error (exited with non-zero status),
     -- but builds failed too often due to this, and we don't want to be forced to debug it every time,

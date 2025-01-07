@@ -50,6 +50,9 @@ logInfo = logLevel "info"
 logError :: MonadIO m => AppState -> Text -> m ()
 logError = logLevel "error"
 
+logWarn :: MonadIO m => AppState -> Text -> m ()
+logWarn = logLevel "warn"
+
 newtype TaskrunnerError = TaskrunnerError String deriving newtype (Show)
 
 instance Exception TaskrunnerError

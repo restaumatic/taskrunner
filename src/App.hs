@@ -333,6 +333,12 @@ timeoutStream appState streamName action = do
     logError appState $ "Task did not close " <> streamName <> " " <> show appState.settings.outputStreamTimeout <> " seconds after exiting."
     logError appState "Perhaps there's a background process?"
 
+    -- Note: this used to be a fatal error (exited with non-zero status),
+    -- but builds failed too often due to this, and we don't want to be forced to debug it every time,
+    -- or to retry the build.
+    --
+    -- Later we might want to add some monitoring so that we can see if this happens often.
+
 outputStreamHandler :: AppState -> Handle -> ByteString -> Handle -> IO ()
 outputStreamHandler appState toplevelOutput streamName stream = do
   handle ignoreEOF $ forever do

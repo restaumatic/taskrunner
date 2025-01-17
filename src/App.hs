@@ -355,10 +355,10 @@ commandHandler appState requestPipe responsePipe =
         logError appState $ "Invalid command pipe request: " <> show requestLine <> "\nError: " <> show err
         B8.hPutStrLn responsePipe "exit 1"
       Right cmd -> do
-        logDebug appState $ "Running cmdpipe command: " <> show cmd
         m_result <- case cmd of
 
           "snapshot":sargs -> do
+            logDebug appState $ "Running cmdpipe command: " <> show cmd
             case SnapshotCliArgs.parse sargs of
               Left err -> do
                 logError appState $ "snapshot: " <> toText err

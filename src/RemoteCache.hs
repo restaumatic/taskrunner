@@ -5,7 +5,7 @@ import Universum
 
 import Control.Monad.Trans.Resource (MonadResource)
 import Amazonka.Env (newEnv, Env'(..), overrideService)
-import Amazonka.S3 (BucketName(..), ObjectKey(..), newGetObject, _NoSuchKey)
+import Amazonka.S3 (BucketName(..), ObjectKey(..), newGetObject, _NoSuchKey, StorageClass (StorageClass_REDUCED_REDUNDANCY))
 import Amazonka.S3.GetObject (GetObjectResponse(..))
 import qualified Data.ByteString as BS
 import Data.Conduit ((.|), ConduitT, bracketP, runConduitRes)
@@ -229,7 +229,8 @@ setLatestBuildHash appState settings jobName branch hash = do
   logDebug appState $ "Uploading latest hash " <> hash <> " to s3://" <> bucket <> "/" <> objectKey
 
   runConduitRes do
-    void $ AWS.send env $ newPutObject (BucketName bucket) (ObjectKey objectKey) (AWS.toBody hash)
+    void $ AWS.send env $ (newPutObject (BucketName bucket) (ObjectKey objectKey) (AWS.toBody hash) :: PutObject)
+      { storageClass = Just StorageClass_REDUCED_REDUNDANCY }
 
 uploadLog
   :: AppState

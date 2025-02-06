@@ -14,7 +14,7 @@ import Amazonka.Logger (newLogger)
 import Amazonka (LogLevel(..), ResponseBody(..))
 import Amazonka.Auth (fromKeys)
 import Amazonka.Endpoint (setEndpoint)
-import Amazonka.S3.CreateMultipartUpload (newCreateMultipartUpload)
+import Amazonka.S3.CreateMultipartUpload (newCreateMultipartUpload, CreateMultipartUpload(..))
 import Amazonka.S3.StreamingUpload (streamUpload)
 import Control.Exception (throwIO)
 import System.Environment (lookupEnv)
@@ -146,7 +146,8 @@ saveCache appState settings relativeCacheRoot files archiveName = do
     logDebug appState $ "Uploading to s3://" <> bucket <> "/" <> objectKey
 
     runConduitRes do
-        let multipartUpload = newCreateMultipartUpload (BucketName bucket) (ObjectKey objectKey)
+        let multipartUpload = (newCreateMultipartUpload (BucketName bucket) (ObjectKey objectKey) :: CreateMultipartUpload)
+              { storageClass = Just StorageClass_REDUCED_REDUNDANCY }
         result <-
           packTar appState cacheRoot filesRelativeToCacheRoot
           .| Zstd.compress 3
@@ -249,6 +250,7 @@ uploadLog appState settings = do
   runConduitRes do
     void $ AWS.send env $ (newPutObject (BucketName bucket) (ObjectKey objectKey) (AWS.toBody content) :: PutObject)
       { contentType = Just "text/plain; charset=utf-8"
+      , storageClass = Just StorageClass_REDUCED_REDUNDANCY
       }
 
   let url = settings.logsViewUrl <> suffix

@@ -132,3 +132,6 @@ tests:
     - taskrunner
     - tasty
     - tasty-golden
+    - wai
+    - warp
+    - http-types

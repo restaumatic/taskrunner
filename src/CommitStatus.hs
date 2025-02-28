@@ -11,7 +11,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Network.HTTP.Client as HTTP
 import Network.HTTP.Client.TLS (tlsManagerSettings)
-import System.Environment (getEnv)
+import System.Environment (getEnv, lookupEnv)
 import Network.HTTP.Types.Status (Status(..))
 import Data.Aeson.Decoding (eitherDecode)
 import qualified Data.Text as Text
@@ -36,6 +36,7 @@ newtype InstallationTokenResponse = InstallationTokenResponse
 updateCommitStatus :: MonadIO m => AppState -> StatusRequest -> m ()
 updateCommitStatus appState statusRequest = liftIO do
   -- Load environment variables
+  apiUrl <- fromMaybe "https://api.github.com" <$> lookupEnv "GITHUB_API_URL"
   appId <- getEnv "GITHUB_APP_ID"
   installationId <- getEnv "GITHUB_INSTALLATION_ID"
   privateKeyStr <- getEnv "GITHUB_APP_PRIVATE_KEY"
@@ -59,7 +60,7 @@ updateCommitStatus appState statusRequest = liftIO do
   manager <- HTTP.newManager tlsManagerSettings
 
   -- Get the installation access token
-  let installUrl = "https://api.github.com/app/installations/" ++ installationId ++ "/access_tokens"
+  let installUrl = apiUrl <> "/app/installations/" ++ installationId ++ "/access_tokens"
   initRequest <- HTTP.parseRequest installUrl
   let request = initRequest
                 { HTTP.method = "POST"
@@ -80,7 +81,7 @@ updateCommitStatus appState statusRequest = liftIO do
       let accessToken = tokenResponse.token
 
       -- Prepare the status update request
-      let statusUrl = "https://api.github.com/repos/" ++ owner ++ "/" ++ repo ++ "/statuses/" ++ toString sha
+      let statusUrl = apiUrl <> "/repos/" ++ owner ++ "/" ++ repo ++ "/statuses/" ++ toString sha
       initStatusRequest <- HTTP.parseRequest statusUrl
       let statusReq = initStatusRequest
                       { HTTP.method = "POST"

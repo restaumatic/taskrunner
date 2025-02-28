@@ -1,3 +1,7 @@
 # By spawning a background process, we add to refcount of the pipe.
+
+# close request pipe to test only stdout/stderr handling
+exec {_taskrunner_toplevel_request_pipe}>&- {_taskrunner_request_pipe}>&-
+
 sleep 2 &
 disown

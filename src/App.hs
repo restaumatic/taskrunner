@@ -145,6 +145,7 @@ main = do
     (subprocessStderrRead, subprocessStderr) <- createPipe
 
     appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
+      <*> newIORef Nothing
 
     logDebug appState $ "Running command: " <> show (args.cmd : args.args)
     logDebug appState $ "  buildId: " <> show buildId

@@ -27,7 +27,6 @@ import Amazonka.S3.ListObjectsV2 (ListObjectsV2Response(..))
 import Amazonka.S3.Types.ObjectIdentifier (newObjectIdentifier)
 import Amazonka.S3.Types.Object (Object(..))
 import qualified FakeGithubApi as FakeGithubApi
-import qualified Data.Text as Text
 
 main :: IO ()
 main = defaultMain =<< goldenTests
@@ -50,6 +49,8 @@ goldenTests = do
           outputFile -- golden file path
           (do
             server <- fakeGithubServer
+            FakeGithubApi.clearOutput server
+
             source <- System.IO.readFile inputFile
             runTest server source
           )
@@ -117,7 +118,7 @@ runTest fakeGithubServer source = do
               pure ["-- output:\n" <> output]
             "github" -> do
               out <- FakeGithubApi.getOutput fakeGithubServer
-              pure ["-- github:\n" <> encodeUtf8 (Text.intercalate "\n" out)]
+              pure ["-- github:\n" <> encodeUtf8 (foldMap (<>"\n") out)]
             glob' -> do
               files <- globDir1 (Glob.compile (toString glob')) dir
               forM files \file -> do

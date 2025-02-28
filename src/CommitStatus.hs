@@ -25,7 +25,7 @@ data StatusRequest = StatusRequest
   , description :: Maybe T.Text
   , context     :: T.Text
   } deriving (Show, Generic)
-  deriving anyclass (ToJSON)
+  deriving anyclass (ToJSON, FromJSON)
 
 -- Define the data type for the installation token response
 newtype InstallationTokenResponse = InstallationTokenResponse
@@ -89,6 +89,8 @@ initClient appState = do
     Right tokenResponse ->
       pure tokenResponse.token
 
+  -- NOTE: we're not refreshing the token. Github docs say it expires after 1 hour. Should be enough for our builds.
+  -- If we experience auth failures, implement token refresh.
 
   pure $ GithubClient { apiUrl = T.pack apiUrl
                       , appId = T.pack appId

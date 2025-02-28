@@ -14,11 +14,11 @@ import qualified System.FilePath as FilePath
 import System.FilePath ((</>))
 import System.Directory ( createDirectoryIfMissing, doesFileExist, getCurrentDirectory, createDirectory )
 import qualified Data.ByteString.Char8 as B8
-import Control.Concurrent.Async (async, wait, cancel)
+import Control.Concurrent.Async (async, wait)
 import Control.Exception.Base (handle, throwIO)
 import System.IO.Error (isEOFError, IOError)
 import System.Posix.ByteString (stdOutput, fdToHandle, handleToFd)
-import System.Posix (Fd, dup, stdError)
+import System.Posix (Fd, dup, stdError, closeFd)
 import CliArgs
 import System.FileLock (withFileLock, SharedExclusive (Exclusive))
 import Data.FileEmbed (embedStringFile)
@@ -124,6 +124,8 @@ main = do
     responsePipeReadFd <- handleToFd responsePipeRead
     hSetBuffering responsePipeWrite LineBuffering
 
+    toplevelRequestPipe <- toplevelStream "_taskrunner_toplevel_request_pipe" requestPipeWriteFd
+
     parentEnv <- getEnvironment
 
     cwd <- getCurrentDirectory
@@ -144,7 +146,14 @@ main = do
 
     (subprocessStderrRead, subprocessStderr) <- createPipe
 
-    appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
+    appState <- AppState settings jobName buildId isToplevel
+      <$> newIORef Nothing
+      <*> newIORef Nothing
+      <*> newIORef False
+      <*> pure toplevelStderr
+      <*> pure toplevelRequestPipe
+      <*> pure subprocessStderr
+      <*> pure logFile
       <*> newIORef Nothing
 
     logDebug appState $ "Running command: " <> show (args.cmd : args.args)
@@ -197,20 +206,7 @@ main = do
               branch <- getCurrentBranch appState
               RemoteCache.setLatestBuildHash appState s (toText appState.jobName) branch h.hash
 
-    timeoutStream appState "stdout" $ wait stdoutHandler
-
-    -- We duplicate `subprocessStderr` before actually passing it to a
-    -- subprocess, so the original handle doesn't get closed by
-    -- `createProcess`. We must close it manually.
-    hClose appState.subprocessStderr
-    timeoutStream appState "stderr" $ wait stderrHandler
-    timeoutStream appState "stderr" $ wait subprocessStderrHandler
-
-    cancel cmdHandler
-
     let shouldReportStatus = (maybe False (.commitStatus) m_snapshotArgs && not skipped) || not isSuccess
-
-    hClose logFile
 
     logViewUrl <-
       if settings.uploadLogs then do
@@ -220,12 +216,27 @@ main = do
         pure Nothing
 
     when (appState.settings.enableCommitStatus && shouldReportStatus) do
-      updateCommitStatus appState StatusRequest
+      requestUpdateCommitStatus appState StatusRequest
         { state = if isSuccess then "success" else "failure"
         , target_url = logViewUrl
         , description = Nothing
         , context = toText appState.jobName
         }
+
+    closeFd requestPipeWriteFd
+    hClose toplevelRequestPipe
+    timeoutStream appState "requestPipe" $ wait cmdHandler
+
+    timeoutStream appState "stdout" $ wait stdoutHandler
+
+    -- We duplicate `subprocessStderr` before actually passing it to a
+    -- subprocess, so the original handle doesn't get closed by
+    -- `createProcess`. We must close it manually.
+    hClose appState.subprocessStderr
+    timeoutStream appState "stderr" $ wait stderrHandler
+    timeoutStream appState "stderr" $ wait subprocessStderrHandler
+
+    hClose logFile
 
     exitWith exitCode
 
@@ -371,6 +382,17 @@ commandHandler appState requestPipe responsePipe =
                       pure "exit 1")
                 pure $ Just $ encodeUtf8 response
 
+          ["updateCommitStatus", arg] -> do
+            logDebug appState $ "Running cmdpipe command: " <> show cmd
+            case Aeson.eitherDecode (encodeUtf8 arg) of
+              Left err -> do
+                logError appState $ "updateCommitStatus: invalid argument: " <> toText err
+              Right request ->
+                updateCommitStatus appState request
+
+            -- No reply, because this command can be issued concurrently
+            pure Nothing
+
           "debug":args -> do
             -- debug - debug message which should land in our log, but originates from a subtask
 
@@ -381,9 +403,15 @@ commandHandler appState requestPipe responsePipe =
           _ -> do
             logError appState $ "Unknown command in command pipe: " <> show cmd
             pure (Just "exit 1")
+
         whenJust m_result \result -> do
           logDebug appState $ "cmdpipe command result: " <> show result
           B8.hPutStrLn responsePipe result
+
+
+requestUpdateCommitStatus :: MonadIO m => AppState -> StatusRequest -> m ()
+requestUpdateCommitStatus appState request =
+  liftIO $ BL8.hPutStrLn appState.toplevelRequestPipe $ Aeson.encode ["updateCommitStatus" :: Text, decodeUtf8 (Aeson.encode request)]
 
 hasInputs :: SnapshotCliArgs -> Bool
 hasInputs args = not (null args.fileInputs) || not (null args.rawInputs)
@@ -458,7 +486,7 @@ snapshot appState args = do
     pure (True, Nothing)
 
   when (args.commitStatus && appState.settings.enableCommitStatus) do
-    updateCommitStatus appState StatusRequest
+    requestUpdateCommitStatus appState StatusRequest
       { state = if runTask then "pending" else "success"
       , target_url = Nothing
       , description = statusDescription

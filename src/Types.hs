@@ -47,6 +47,7 @@ data AppState = AppState
   , snapshotArgsRef :: IORef (Maybe SnapshotCliArgs)
   , skipped :: IORef Bool
   , toplevelStderr :: Handle
+  , toplevelRequestPipe :: Handle
   , subprocessStderr :: Handle
   , logOutput :: Handle
   

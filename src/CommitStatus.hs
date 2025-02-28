@@ -11,7 +11,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Network.HTTP.Client as HTTP
 import Network.HTTP.Client.TLS (tlsManagerSettings)
-import System.Environment (getEnv, lookupEnv)
+import System.Environment (getEnv, lookupEnv, setEnv)
 import Network.HTTP.Types.Status (Status(..))
 import Data.Aeson.Decoding (eitherDecode)
 import qualified Data.Text as Text
@@ -55,40 +55,49 @@ initClient appState = do
   -- Prepare the HTTP manager
   manager <- HTTP.newManager tlsManagerSettings
 
-  let privateKeyBytes = encodeUtf8 $ Text.replace "|" "\n" $ toText privateKeyStr
-  let privateKey = fromMaybe (error "Invalid github key") $ readRsaSecret privateKeyBytes
+  let createToken = do
+        let privateKeyBytes = encodeUtf8 $ Text.replace "|" "\n" $ toText privateKeyStr
+        let privateKey = fromMaybe (error "Invalid github key") $ readRsaSecret privateKeyBytes
 
-  -- Create the JWT token
-  now <- getPOSIXTime
-  let claims = mempty { iss = stringOrURI $ T.pack appId
-                   , iat = numericDate now
-                   , exp = numericDate (now + 5 * 60)
-                   }
-  let jwt = encodeSigned (EncodeRSAPrivateKey privateKey) (mempty { alg = Just RS256 }) claims
+        -- Create the JWT token
+        now <- getPOSIXTime
+        let claims = mempty { iss = stringOrURI $ T.pack appId
+                         , iat = numericDate now
+                         , exp = numericDate (now + 5 * 60)
+                         }
+        let jwt = encodeSigned (EncodeRSAPrivateKey privateKey) (mempty { alg = Just RS256 }) claims
 
-  -- Get the installation access token
-  let installUrl = apiUrl <> "/app/installations/" ++ installationId ++ "/access_tokens"
-  initRequest <- HTTP.parseRequest installUrl
-  let request = initRequest
-                { HTTP.method = "POST"
-                , HTTP.requestHeaders =
-                    [ ("Authorization", "Bearer " <> TE.encodeUtf8 jwt)
-                    , ("Accept", "application/vnd.github.v3+json")
-                    , ("User-Agent", "restaumatic-bot")
-                    ]
-                }
-  response <- HTTP.httpLbs request manager
-  let mTokenResponse = eitherDecode @InstallationTokenResponse (HTTP.responseBody response)
-  accessToken <- case mTokenResponse of
-    Left err -> do
-      logError appState $ "CommitStatus: Failed to parse installation token response: " <> show err
-      logError appState $ "CommitStatus: Response: " <> decodeUtf8 response.responseBody
+        -- Get the installation access token
+        let installUrl = apiUrl <> "/app/installations/" ++ installationId ++ "/access_tokens"
+        initRequest <- HTTP.parseRequest installUrl
+        let request = initRequest
+                      { HTTP.method = "POST"
+                      , HTTP.requestHeaders =
+                          [ ("Authorization", "Bearer " <> TE.encodeUtf8 jwt)
+                          , ("Accept", "application/vnd.github.v3+json")
+                          , ("User-Agent", "restaumatic-bot")
+                          ]
+                      }
+        response <- HTTP.httpLbs request manager
+        let mTokenResponse = eitherDecode @InstallationTokenResponse (HTTP.responseBody response)
+        case mTokenResponse of
+          Left err -> do
+            logError appState $ "CommitStatus: Failed to parse installation token response: " <> show err
+            logError appState $ "CommitStatus: Response: " <> decodeUtf8 response.responseBody
 
-      -- FIXME: handle the error better
-      exitFailure
-    Right tokenResponse ->
-      pure tokenResponse.token
+            -- FIXME: handle the error better
+            exitFailure
+          Right tokenResponse ->
+            pure tokenResponse.token
 
+  -- Try to read token from environment variable
+  -- Otherwise generate a new one, and set env for future uses (also in child processes)
+  accessToken <- lookupEnv "_taskrunner_github_access_token" >>= \case
+    Just token -> pure $ T.pack token
+    Nothing -> do
+      token <- createToken
+      setEnv "_taskrunner_github_access_token" $ T.unpack token
+      pure token
 
   pure $ GithubClient { apiUrl = T.pack apiUrl
                       , appId = T.pack appId

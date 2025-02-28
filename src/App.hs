@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE RecursiveDo #-}
 {-# OPTIONS_GHC -Wno-ambiguous-fields #-}
 
 module App where
@@ -39,6 +40,7 @@ import Utils
 import qualified RemoteCache
 import RemoteCache (getLatestBuildHash)
 import CommitStatus (updateCommitStatus, StatusRequest (..))
+import qualified CommitStatus
 import qualified System.Process as Process
 import Control.Monad.EarlyReturn (withEarlyReturn, earlyReturn)
 import Data.Time.Format.ISO8601 (iso8601Show)
@@ -124,28 +126,35 @@ main = do
     responsePipeReadFd <- handleToFd responsePipeRead
     hSetBuffering responsePipeWrite LineBuffering
 
-    parentEnv <- getEnvironment
+    -- Recursive: AppState is used before process is started (mostly for logging)
+    rec
 
-    cwd <- getCurrentDirectory
+      appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
+        <*> newIORef Nothing
 
-    -- TODO: handle spawn error here
-    -- TODO: should we use withCreateProcess?
-    -- TODO: should we use delegate_ctlc or DIY? See https://hackage.haskell.org/package/process-1.6.20.0/docs/System-Process.html#g:4
-    -- -> We should DIY because we need to flush stream etc.
-    (Nothing, Just stdoutPipe, Just stderrPipe, processHandle) <- Process.createProcess
-      (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe
-      , std_err = CreatePipe
-      , env=Just $ nubOrdOn fst $
-          [ ("BASH_FUNC_snapshot%%", "() {\n" <> $(embedStringFile "src/snapshot.sh") <> "\n}")
-          , ("_taskrunner_request_pipe", show requestPipeWriteFd)
-          , ("_taskrunner_response_pipe", show responsePipeReadFd)
-          ] <> parentEnv
-        }
+      when isToplevel do
+        -- Note: potentially sets env for subprocesses
+        void $ CommitStatus.getClient appState
 
-    (subprocessStderrRead, subprocessStderr) <- createPipe
+      parentEnv <- getEnvironment
 
-    appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
-      <*> newIORef Nothing
+      cwd <- getCurrentDirectory
+
+      -- TODO: handle spawn error here
+      -- TODO: should we use withCreateProcess?
+      -- TODO: should we use delegate_ctlc or DIY? See https://hackage.haskell.org/package/process-1.6.20.0/docs/System-Process.html#g:4
+      -- -> We should DIY because we need to flush stream etc.
+      (Nothing, Just stdoutPipe, Just stderrPipe, processHandle) <- Process.createProcess
+        (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe
+        , std_err = CreatePipe
+        , env=Just $ nubOrdOn fst $
+            [ ("BASH_FUNC_snapshot%%", "() {\n" <> $(embedStringFile "src/snapshot.sh") <> "\n}")
+            , ("_taskrunner_request_pipe", show requestPipeWriteFd)
+            , ("_taskrunner_response_pipe", show responsePipeReadFd)
+            ] <> parentEnv
+          }
+
+      (subprocessStderrRead, subprocessStderr) <- createPipe
 
     logDebug appState $ "Running command: " <> show (args.cmd : args.args)
     logDebug appState $ "  buildId: " <> show buildId

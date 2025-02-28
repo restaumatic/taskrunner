@@ -49,12 +49,13 @@ data Server = Server
   }
 
 start :: Int -> IO Server
-start port = mdo
+start port = do
   started <- newEmptyMVar
   output <- newIORef []
   let settings = Warp.setPort port $ Warp.setBeforeMainLoop (putMVar started ()) Warp.defaultSettings
-  tid <- forkIO $ Warp.runSettings settings $ app server
-  let server = Server {tid, output}
+  rec
+    let server = Server {tid, output}
+    tid <- forkIO $ Warp.runSettings settings $ app server
   takeMVar started
   pure server
 

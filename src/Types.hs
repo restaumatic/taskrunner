@@ -3,6 +3,7 @@ module Types where
 import Universum
 import SnapshotCliArgs (SnapshotCliArgs)
 import Data.Aeson (FromJSON, ToJSON)
+import qualified Network.HTTP.Client as HTTP
 
 data Settings = Settings
   { stateDirectory :: FilePath
@@ -46,6 +47,22 @@ data AppState = AppState
   , snapshotArgsRef :: IORef (Maybe SnapshotCliArgs)
   , skipped :: IORef Bool
   , toplevelStderr :: Handle
+  , toplevelRequestPipe :: Handle
   , subprocessStderr :: Handle
   , logOutput :: Handle
+  
+  -- | Lazily initialized Github client
+  , githubClient :: IORef (Maybe GithubClient)
+  }
+
+-- Unfortunately the type has to live there due to circular dependencies (AppState -> GithubClient -> AppState)
+data GithubClient = GithubClient
+  { apiUrl :: Text
+  , appId :: Text
+  , installationId :: Text
+  , privateKey :: Text
+  , owner :: Text
+  , repo :: Text
+  , manager :: HTTP.Manager
+  , accessToken :: Text
   }

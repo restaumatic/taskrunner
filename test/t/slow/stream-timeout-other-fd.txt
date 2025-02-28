@@ -1,5 +1,7 @@
 # This tests that we do allow background processes, provided they don't inherit stdin/out/err.
 # Essentally this checks whether we leak the stdout/err pipes in other file descrpitors.
 
+# FIXME: this can't work, because we _do_ leak the command pipe, and we wait for it to be closed
+
 sleep 2 </dev/null >/dev/null 2>/dev/null &
 disown

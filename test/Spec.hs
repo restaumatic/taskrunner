@@ -1,6 +1,9 @@
+{-# LANGUAGE LambdaCase #-}
+
 import Universum
 
 import Test.Tasty (defaultMain, TestTree, testGroup)
+import qualified Test.Tasty as Tasty
 import Test.Tasty.Golden (findByExtension, goldenVsStringDiff)
 import qualified Data.ByteString.Lazy as LBS
 import System.FilePath (takeBaseName, replaceExtension)
@@ -23,9 +26,13 @@ import Amazonka.S3.Types.Delete (Delete(..))
 import Amazonka.S3.ListObjectsV2 (ListObjectsV2Response(..))
 import Amazonka.S3.Types.ObjectIdentifier (newObjectIdentifier)
 import Amazonka.S3.Types.Object (Object(..))
+import qualified FakeGithubApi
 
 main :: IO ()
 main = defaultMain =<< goldenTests
+
+fakeGithubPort :: Int
+fakeGithubPort = 12345
 
 goldenTests :: IO TestTree
 goldenTests = do
@@ -34,18 +41,25 @@ goldenTests = do
   let inputFiles
         | skipSlow = filter (\filename -> not ("/slow/" `isInfixOf` filename)) inputFiles0
         | otherwise = inputFiles0
-  return $ testGroup "tests"
-    [ goldenVsStringDiff
-        (takeBaseName inputFile) -- test name
-        (\ref new -> ["diff", "-u", ref, new])
-        outputFile -- golden file path
-        (System.IO.readFile inputFile >>= runTest) -- action whose result is tested
-    | inputFile <- inputFiles
-    , let outputFile = replaceExtension inputFile ".out"
-    ]
+  pure $ Tasty.withResource (FakeGithubApi.start fakeGithubPort) FakeGithubApi.stop \fakeGithubServer ->
+    testGroup "tests"
+      [ goldenVsStringDiff
+          (takeBaseName inputFile) -- test name
+          (\ref new -> ["diff", "-u", ref, new])
+          outputFile -- golden file path
+          (do
+            server <- fakeGithubServer
+            FakeGithubApi.clearOutput server
 
-runTest :: String -> IO LBS.ByteString
-runTest source = do
+            source <- System.IO.readFile inputFile
+            runTest server source
+          )
+      | inputFile <- inputFiles
+      , let outputFile = replaceExtension inputFile ".out"
+      ]
+
+runTest :: FakeGithubApi.Server -> String -> IO LBS.ByteString
+runTest fakeGithubServer source = do
   withSystemTempDirectory "testrunner-test" \dir -> do
     let options = getOptions (toText source)
 
@@ -64,7 +78,10 @@ runTest source = do
           | otherwise =
               proc "bash" bashArgs
 
-    maybeWithBucket options \s3ExtraEnv ->
+    maybeWithBucket options \s3ExtraEnv -> do
+      -- Generate a fake GitHub key with command: openssl genrsa -out test/fake-github-key.pem 2048
+      githubKey <- System.IO.readFile "test/fake-github-key.pem"
+
       withCreateProcess
         initialProc { std_out = UseHandle pipeWrite, std_err = UseHandle pipeWrite
             , env = Just
@@ -77,8 +94,18 @@ runTest source = do
               , ("GIT_AUTHOR_EMAIL", "test@example.com")
               , ("GIT_COMMITTER_NAME", "test")
               , ("GIT_COMMITTER_EMAIL", "test@example.com")
+
               , ("PATH", path)
-              ] <> s3ExtraEnv)
+              ] <>
+              mwhen options.githubKeys
+                [ ("GITHUB_API_URL", "http://localhost:" <> show fakeGithubPort)
+                , ("GITHUB_APP_ID", "666")
+                , ("GITHUB_INSTALLATION_ID", "123")
+                , ("GITHUB_APP_PRIVATE_KEY", githubKey)
+                , ("GITHUB_REPOSITORY_OWNER", "fakeowner")
+                , ("GITHUB_REPOSITORY", "fakerepo")
+                ] <>
+              s3ExtraEnv)
             , cwd = Just dir
             } \_ _ _ processHandle -> do
 
@@ -88,10 +115,13 @@ runTest source = do
         exitCode <- waitForProcess processHandle
 
         checkFiles <-
-          forM options.checkFileGlobs \glob' ->
-            if glob' == "output" then
+          forM options.checkFileGlobs \case
+            "output" ->
               pure ["-- output:\n" <> output]
-            else do
+            "github" -> do
+              out <- FakeGithubApi.getOutput fakeGithubServer
+              pure ["-- github:\n" <> encodeUtf8 (foldMap (<>"\n") out)]
+            glob' -> do
               files <- globDir1 (Glob.compile (toString glob')) dir
               forM files \file -> do
                 content <- LBS.readFile file
@@ -109,6 +139,9 @@ data Options = Options
   { checkFileGlobs :: [Text]
   , toplevel :: Bool
   , s3 :: Bool
+  -- | Whether to provide GitHub app credentials in environment.
+  -- If github status is disabled, taskrunner should work without them.
+  , githubKeys :: Bool
   }
 
 instance Default Options where
@@ -116,6 +149,7 @@ instance Default Options where
     { checkFileGlobs = ["output"]
     , toplevel = True
     , s3 = False
+    , githubKeys = False
     }
 
 getOptions :: Text -> Options
@@ -131,6 +165,9 @@ getOptions source = flip execState def $ go (lines source)
         go rest
       ["#", "s3"] -> do
         modify (\s -> s { s3 = True })
+        go rest
+      ["#", "github", "keys"] -> do
+        modify (\s -> s { githubKeys = True })
         go rest
       -- TODO: validate?
       _ ->
@@ -172,3 +209,7 @@ maybeWithBucket Options{s3=True} block = do
       , ("TASKRUNNER_REMOTE_CACHE_BUCKET", bucketName)
       , ("TASKRUNNER_REMOTE_CACHE_PREFIX", "")
       ]
+
+mwhen :: Monoid a => Bool -> a -> a
+mwhen True x = x
+mwhen False _ = mempty

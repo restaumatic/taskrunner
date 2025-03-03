@@ -1,0 +1,18 @@
+# check output github
+# no toplevel
+# github keys
+
+export TASKRUNNER_ENABLE_COMMIT_STATUS=1
+
+git init -q
+git commit --allow-empty -q -m "Initial commit"
+
+# Note: first task doesn't report success status (as opposed to github-commit-status-nested test)
+
+taskrunner -n mytask bash -e -c '
+  snapshot -n
+  taskrunner -n othertask bash -e -c "
+    snapshot -n --commit-status
+    echo Success
+  "
+'

@@ -1,0 +1,14 @@
+# check output github
+# no toplevel
+# github keys
+
+export TASKRUNNER_ENABLE_COMMIT_STATUS=1
+
+git init -q
+git commit --allow-empty -q -m "Initial commit"
+
+taskrunner -n mytask bash -e -c '
+  snapshot -n
+  echo FAIL
+  exit 1
+'

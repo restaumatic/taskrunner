@@ -26,7 +26,7 @@ import Amazonka.S3.Types.Delete (Delete(..))
 import Amazonka.S3.ListObjectsV2 (ListObjectsV2Response(..))
 import Amazonka.S3.Types.ObjectIdentifier (newObjectIdentifier)
 import Amazonka.S3.Types.Object (Object(..))
-import qualified FakeGithubApi as FakeGithubApi
+import qualified FakeGithubApi
 
 main :: IO ()
 main = defaultMain =<< goldenTests
@@ -95,15 +95,17 @@ runTest fakeGithubServer source = do
               , ("GIT_COMMITTER_NAME", "test")
               , ("GIT_COMMITTER_EMAIL", "test@example.com")
 
-              , ("GITHUB_API_URL", "http://localhost:" <> show fakeGithubPort)
-              , ("GITHUB_APP_ID", "666")
-              , ("GITHUB_INSTALLATION_ID", "123")
-              , ("GITHUB_APP_PRIVATE_KEY", githubKey)
-              , ("GITHUB_REPOSITORY_OWNER", "fakeowner")
-              , ("GITHUB_REPOSITORY", "fakerepo")
-
               , ("PATH", path)
-              ] <> s3ExtraEnv)
+              ] <>
+              mwhen options.githubKeys
+                [ ("GITHUB_API_URL", "http://localhost:" <> show fakeGithubPort)
+                , ("GITHUB_APP_ID", "666")
+                , ("GITHUB_INSTALLATION_ID", "123")
+                , ("GITHUB_APP_PRIVATE_KEY", githubKey)
+                , ("GITHUB_REPOSITORY_OWNER", "fakeowner")
+                , ("GITHUB_REPOSITORY", "fakerepo")
+                ] <>
+              s3ExtraEnv)
             , cwd = Just dir
             } \_ _ _ processHandle -> do
 
@@ -137,6 +139,9 @@ data Options = Options
   { checkFileGlobs :: [Text]
   , toplevel :: Bool
   , s3 :: Bool
+  -- | Whether to provide GitHub app credentials in environment.
+  -- If github status is disabled, taskrunner should work without them.
+  , githubKeys :: Bool
   }
 
 instance Default Options where
@@ -144,6 +149,7 @@ instance Default Options where
     { checkFileGlobs = ["output"]
     , toplevel = True
     , s3 = False
+    , githubKeys = False
     }
 
 getOptions :: Text -> Options
@@ -159,6 +165,9 @@ getOptions source = flip execState def $ go (lines source)
         go rest
       ["#", "s3"] -> do
         modify (\s -> s { s3 = True })
+        go rest
+      ["#", "github", "keys"] -> do
+        modify (\s -> s { githubKeys = True })
         go rest
       -- TODO: validate?
       _ ->
@@ -200,3 +209,7 @@ maybeWithBucket Options{s3=True} block = do
       , ("TASKRUNNER_REMOTE_CACHE_BUCKET", bucketName)
       , ("TASKRUNNER_REMOTE_CACHE_PREFIX", "")
       ]
+
+mwhen :: Monoid a => Bool -> a -> a
+mwhen True x = x
+mwhen False _ = mempty

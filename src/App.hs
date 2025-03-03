@@ -132,8 +132,8 @@ main = do
       appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
         <*> newIORef Nothing
 
-      when isToplevel do
-        -- Note: potentially sets env for subprocesses
+      when (isToplevel && appState.settings.enableCommitStatus) do
+        -- Note: sets env for subprocesses, so has to be called before starting subprocess
         void $ CommitStatus.getClient appState
 
       parentEnv <- getEnvironment

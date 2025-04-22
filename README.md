@@ -134,10 +134,10 @@ To use it, first build using another system, and the run `taskrunner` with `TASK
 
 The `snapshot` command supports the following flags:
 
-- `--cache-success`: Caches the result of a successful command execution. If the inputs have not changed, the command is not rerun.
 - `--outputs`: Specifies the output files of the task. These files are used to determine if the task needs to be rerun.
+- `--cache-success`: Use remote cache even when no outputs are specified. The task is not rerun if it succeeded previously with the same inputs.
 - `--raw`: Specifies raw input strings that are used to compute the task's hash.
 - `--fuzzy-cache`: Enables the use of a fuzzy cache, which attempts to restore from a cache of a similar task if the exact cache is not available.
-- `--cache-root`: Specifies the root directory for caching.
-- `--cache-version`: Specifies a version string for the cache, allowing differentiation between different cache versions.
+- `--cache-root`: Specifies the root directory for caching. Use when caching things outside of the repository, e.g. `~/.stack`.
+- `--cache-version`: Specifies a version string for the cache. `--fuzzy-cache` will not download cache from another version, allowing clean breaks when making big changes, e.g. upgrading a compiler.
 - `--commit-status`: Enables reporting of the task's status to a commit status system, such as GitHub checks.

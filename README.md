@@ -135,7 +135,9 @@ To use it, first build using another system, and the run `taskrunner` with `TASK
 The `snapshot` command supports the following flags:
 
 - `--cache-success`: Caches the result of a successful command execution. If the inputs have not changed, the command is not rerun.
-- `--outputs`: TODO
-- `--inputs`: TODO
-- `--cache-failure`: TODO
-- `--cache-key`: TODO
+- `--outputs`: Specifies the output files of the task. These files are used to determine if the task needs to be rerun.
+- `--raw`: Specifies raw input strings that are used to compute the task's hash.
+- `--fuzzy-cache`: Enables the use of a fuzzy cache, which attempts to restore from a cache of a similar task if the exact cache is not available.
+- `--cache-root`: Specifies the root directory for caching.
+- `--cache-version`: Specifies a version string for the cache, allowing differentiation between different cache versions.
+- `--commit-status`: Enables reporting of the task's status to a commit status system, such as GitHub checks.

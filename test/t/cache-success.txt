@@ -19,19 +19,17 @@ go() {
   TASKRUNNER_STATE_DIRECTORY="$(pwd)" taskrunner -n mytask bash -e -c '
     snapshot input.txt --cache-success
     echo "Expensive computation"
-    rev input.txt > /dev/null
+    rev input.txt
   '
 }
 
 (
   cd a
   go
-  echo "Output in a is: $(cat input.txt | rev)"
 )
 
 (
   cd b
   echo bar > input.txt
   go # note: should run "expensive computation" again
-  echo "Output in b is: $(cat input.txt | rev)"
 )

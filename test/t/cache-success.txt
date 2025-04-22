@@ -17,7 +17,7 @@ cp -r a b
 go() {
   # Note: we want separate workdir for separate repos
   TASKRUNNER_STATE_DIRECTORY="$(pwd)" taskrunner -n mytask bash -e -c '
-    snapshot input.txt --outputs output.txt --cache-success
+    snapshot input.txt --cache-success
     echo "Expensive computation"
     rev input.txt > output.txt
   '

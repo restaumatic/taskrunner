@@ -84,7 +84,7 @@ parse input = map fst $ flip execStateT (def :: SnapshotCliArgs, BeforeOutputs) 
   go ("--cache-success":xs) = do
     modifyArgs (\s -> s { cacheSuccess = True })
     go xs
-    lift $ Left $ "Invalid option or missing argument: " <> opt
+    lift $ Left "Invalid option or missing argument"
 
   go (path:xs) = do
     (_, phase) <- get

@@ -197,7 +197,7 @@ main = do
           forM_ snapshotArgs.postUnpackCommands \cmd -> do
             runPostUnpackCmd appState cmd
 
-          when (hasOutputs snapshotArgs && settings.saveRemoteCache && (not skipped || appState.settings.primeCacheMode)) do
+          when (hasCache snapshotArgs && settings.saveRemoteCache && (not skipped || appState.settings.primeCacheMode)) do
             logDebug appState "Saving remote cache"
             s <- RemoteCache.getRemoteCacheSettingsFromEnv
             RemoteCache.saveCache appState s (fromMaybe settings.rootDirectory snapshotArgs.cacheRoot) snapshotArgs.outputs (archiveName appState snapshotArgs h.hash)
@@ -397,8 +397,8 @@ commandHandler appState requestPipe responsePipe =
 hasInputs :: SnapshotCliArgs -> Bool
 hasInputs args = not (null args.fileInputs) || not (null args.rawInputs)
 
-hasOutputs :: SnapshotCliArgs -> Bool
-hasOutputs args = not (null args.outputs)
+hasCache :: SnapshotCliArgs -> Bool
+hasCache args = args.cacheSuccess || not (null args.outputs)
 
 snapshot :: AppState -> SnapshotCliArgs -> IO String
 snapshot appState args = do
@@ -447,7 +447,7 @@ snapshot appState args = do
       earlyReturn (False, Nothing)
 
 
-    when (hasOutputs args && not force) do
+    when (hasCache args && not force) do
       s <- RemoteCache.getRemoteCacheSettingsFromEnv
       success <- liftIO $ RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash) RemoteCache.Log
       when success do

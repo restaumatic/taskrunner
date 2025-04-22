@@ -456,7 +456,7 @@ snapshot appState args = do
 
     logInfo appState "Inputs changed, running task"
 
-    when (not force && hasOutputs args && args.fuzzyCache && mainBranchCommitChanged savedHashInfo hashInfo) do
+    when (not force && hasRemoteCache args && args.fuzzyCache && mainBranchCommitChanged savedHashInfo hashInfo) do
       success <- tryRestoreFuzzyCache appState args
       when success do
         -- Save change in mainBranchCommit, even if the task didn't succeed yet.

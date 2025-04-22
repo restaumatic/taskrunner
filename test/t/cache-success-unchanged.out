@@ -1,0 +1,9 @@
+-- output:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation
+[mytask] stdout | oof
+[mytask] info | success
+[mytask] info | Found remote cache mytask-6b36308659163b577fd1c832107dc46ca3aa659b.tar.zst, restoring
+[mytask] info | Restored from remote cache
+[mytask] stdout | oof
+[mytask] info | success

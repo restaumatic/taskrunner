@@ -14,6 +14,7 @@ data SnapshotCliArgs = SnapshotCliArgs
     , cacheRoot :: Maybe FilePath
     , cacheVersion :: Maybe Text
     , commitStatus :: Bool
+    , cacheSuccess :: Bool
     } deriving (Show)
 
 instance Default SnapshotCliArgs where
@@ -28,6 +29,7 @@ instance Default SnapshotCliArgs where
     , cacheRoot = Nothing
     , cacheVersion = Nothing
     , commitStatus = False
+    , cacheSuccess = False
     }
 
 type ParseError = String
@@ -79,7 +81,9 @@ parse input = map fst $ flip execStateT (def :: SnapshotCliArgs, BeforeOutputs) 
     modifyArgs (\s -> s { commitStatus = True })
     go xs
 
-  go (opt:_) | '-':_ <- opt =
+  go ("--cache-success":xs) = do
+    modifyArgs (\s -> s { cacheSuccess = True })
+    go xs
     lift $ Left $ "Invalid option or missing argument: " <> opt
 
   go (path:xs) = do

@@ -141,3 +141,4 @@ The `snapshot` command supports the following flags:
 - `--cache-root`: Specifies the root directory for caching. Use when caching things outside of the repository, e.g. `~/.stack`.
 - `--cache-version`: Specifies a version string for the cache. `--fuzzy-cache` will not download cache from another version, allowing clean breaks when making big changes, e.g. upgrading a compiler.
 - `--commit-status`: Enables reporting of the task's status to a commit status system, such as GitHub checks.
+- `--long-running`: Indicates that the task is expected to run for a long time. This may affect how the task is managed or monitored.

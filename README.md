@@ -2,6 +2,16 @@
 
 ## Features
 
+## Snapshot Command Flags
+
+The `snapshot` command supports the following flags:
+
+- `--cache-success`: Caches the result of a successful command execution. If the inputs have not changed, the command is not rerun.
+- `--outputs`: TODO
+- `--inputs`: TODO
+- `--cache-failure`: TODO
+- `--cache-key`: TODO
+
 - Runs tasks (which are defined as shell scripts)
 - Ensures only one instance of a task runs at a time (globally in the whole system) - using file-based locks
 - Tasks can run in parallel

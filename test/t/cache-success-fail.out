@@ -1,0 +1,9 @@
+-- output:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation
+[mytask] error | Failed, exit code: 1
+First run failed as expected
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation
+[mytask] error | Failed, exit code: 1
+-- exit code: 1

@@ -2,6 +2,7 @@
 
 ## Features
 
+
 - Runs tasks (which are defined as shell scripts)
 - Ensures only one instance of a task runs at a time (globally in the whole system) - using file-based locks
 - Tasks can run in parallel
@@ -128,3 +129,16 @@ To use it, first build using another system, and the run `taskrunner` with `TASK
 
 - Previous impl no-op tests/scripts/UPDATE: ~1.6s
 - Current impl no-op tests/scripts/UPDATE: ~2.3s
+
+## Snapshot Command Flags
+
+The `snapshot` command supports the following flags:
+
+- `--outputs`: Specifies the output files of the task. These files are used to determine if the task needs to be rerun.
+- `--cache-success`: Use remote cache even when no outputs are specified. The task is not rerun if it succeeded previously with the same inputs. Useful e.g. for test suites.
+- `--raw`: Specifies raw input strings that are used to compute the task's hash.
+- `--fuzzy-cache`: Enables the use of a fuzzy cache, which attempts to restore from a cache of a similar task if the exact cache is not available.
+- `--cache-root`: Specifies the root directory for caching. Use when caching things outside of the repository, e.g. `~/.stack`.
+- `--cache-version`: Specifies a version string for the cache. `--fuzzy-cache` will not download cache from another version, allowing clean breaks when making big changes, e.g. upgrading a compiler.
+- `--commit-status`: Enables reporting of the task's status to a commit status system, such as GitHub checks.
+- `--long-running`: Indicates that the task is expected to run for a long time (e.g. a server). Currently doens't have any effect though, TODO: can we remove it?

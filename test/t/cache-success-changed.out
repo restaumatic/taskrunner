@@ -1,0 +1,9 @@
+-- output:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation
+[mytask] stdout | oof
+[mytask] info | success
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation
+[mytask] stdout | rab
+[mytask] info | success

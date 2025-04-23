@@ -40,7 +40,7 @@ import Amazonka.S3.PutObject (newPutObject, PutObject(..))
 packTar :: MonadResource m => AppState -> FilePath -> [FilePath] -> ConduitT () BS.ByteString m ()
 packTar appState workdir files = do
   let cmd = "tar"
-  let args = ["-c"] <> files
+  let args = if null files then ["-c", "--files-from=/dev/null"] else ["-c"] <> files
   liftIO $ logDebug appState $ "Running subprocess: " <> show (cmd:args) <> " in cwd " <> show workdir
   bracketP ( createProcess_ "createProcess_"
     (proc cmd args)

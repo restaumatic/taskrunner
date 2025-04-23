@@ -2,3 +2,4 @@
 *~
 .test-env
 ghtest-env
+.aider*

@@ -134,7 +134,7 @@ To use it, first build using another system, and the run `taskrunner` with `TASK
 
 The `snapshot` command supports the following flags:
 
-- `--outputs`: Specifies the output files of the task. These files are used to determine if the task needs to be rerun.
+- `--outputs`: Specifies files to be cached in remote cache.
 - `--cache-success`: Use remote cache even when no outputs are specified. The task is not rerun if it succeeded previously with the same inputs. Useful e.g. for test suites.
 - `--raw`: Specifies raw input strings that are used to compute the task's hash.
 - `--fuzzy-cache`: Enables the use of a fuzzy cache, which attempts to restore from a cache of a similar task if the exact cache is not available.

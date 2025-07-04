@@ -80,6 +80,17 @@ bytesfmt formatter bs = printf (formatter <> " %s")
   bytesSuffixes = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
   bytesSuffix = bytesSuffixes !! i
 
+hasLocalChanges :: AppState -> IO Bool
+hasLocalChanges appState =
+  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ -> do
+    output <-
+      readCreateProcess
+        (proc "git" ["status", "--porcelain", "--untracked-files=no"])
+          { std_err = UseHandle stderr_
+          }
+        ""
+    pure $ not (null output)
+
 getCurrentBranch :: AppState -> IO Text
 getCurrentBranch appState =
   bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->

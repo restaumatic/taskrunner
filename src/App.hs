@@ -425,7 +425,7 @@ snapshot appState args = do
     mainBranchCommit <- liftIO $ getMainBranchCommit appState
     let force = appState.settings.force
 
-    isWorkingTreeClean <- map not $ liftIO $ hasLocalChanges appState
+    inputsAreClean <- liftIO $ not <$> isDirtyAtPaths appState args.fileInputs
 
     let hashInfo = HashInfo
           { hash = currentHash
@@ -448,8 +448,7 @@ snapshot appState args = do
       logDebug appState "Prime cache mode, assuming task is done and skippping!"
       earlyReturn (False, Nothing)
 
-
-    when (hasRemoteCache args && not force && isWorkingTreeClean) do
+    when (hasRemoteCache args && not force && inputsAreClean) do
       s <- RemoteCache.getRemoteCacheSettingsFromEnv
       success <- liftIO $ RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash) RemoteCache.Log
       when success do
@@ -458,7 +457,7 @@ snapshot appState args = do
 
     logInfo appState "Inputs changed, running task"
 
-    when (not force && hasRemoteCache args && args.fuzzyCache && mainBranchCommitChanged savedHashInfo hashInfo && isWorkingTreeClean) do
+    when (not force && hasRemoteCache args && args.fuzzyCache && mainBranchCommitChanged savedHashInfo hashInfo && inputsAreClean) do
       success <- tryRestoreFuzzyCache appState args
       when success do
         -- Save change in mainBranchCommit, even if the task didn't succeed yet.

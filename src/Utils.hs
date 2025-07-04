@@ -80,12 +80,12 @@ bytesfmt formatter bs = printf (formatter <> " %s")
   bytesSuffixes = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
   bytesSuffix = bytesSuffixes !! i
 
-hasLocalChanges :: AppState -> IO Bool
-hasLocalChanges appState =
+isDirtyAtPaths :: AppState -> [FilePath] -> IO Bool
+isDirtyAtPaths appState paths =
   bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ -> do
     output <-
       readCreateProcess
-        (proc "git" ["status", "--porcelain", "--untracked-files=no"])
+        (proc "git" (["status", "--porcelain", "--untracked-files=no", "--"] ++ paths))
           { std_err = UseHandle stderr_
           }
         ""

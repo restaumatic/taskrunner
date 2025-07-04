@@ -130,7 +130,7 @@ To use it, first build using another system, and the run `taskrunner` with `TASK
 - Previous impl no-op tests/scripts/UPDATE: ~1.6s
 - Current impl no-op tests/scripts/UPDATE: ~2.3s
 
-## Snapshot Command Flags
+##  Snapshot Command Flags
 
 The `snapshot` command supports the following flags:
 
@@ -142,3 +142,15 @@ The `snapshot` command supports the following flags:
 - `--cache-version`: Specifies a version string for the cache. `--fuzzy-cache` will not download cache from another version, allowing clean breaks when making big changes, e.g. upgrading a compiler.
 - `--commit-status`: Enables reporting of the task's status to a commit status system, such as GitHub checks.
 - `--long-running`: Indicates that the task is expected to run for a long time (e.g. a server). Currently doens't have any effect though, TODO: can we remove it?
+
+
+## Tests: Update Golden Files
+
+This project uses [tasty-golden](https://github.com/UnkindPartition/tasty-golden) for snapshot-based testing.
+
+To update the golden files, run the test suite with the `--accept` flag passed to the test executable.
+If you're using stack, the full command is:
+
+```sh
+stack test --test-arguments --accept
+```

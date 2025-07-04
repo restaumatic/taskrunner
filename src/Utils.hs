@@ -81,6 +81,7 @@ bytesfmt formatter bs = printf (formatter <> " %s")
   bytesSuffix = bytesSuffixes !! i
 
 isDirtyAtPaths :: AppState -> [FilePath] -> IO Bool
+isDirtyAtPaths _ [] = pure False
 isDirtyAtPaths appState paths =
   bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ -> do
     output <-

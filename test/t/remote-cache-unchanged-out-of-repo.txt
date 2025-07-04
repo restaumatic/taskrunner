@@ -10,6 +10,7 @@ mkdir a
   echo foo > input.txt
   git init -q
   git add input.txt
+  git commit -qm "Add input.txt"
 )
 
 cp -r a b

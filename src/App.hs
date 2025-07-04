@@ -425,6 +425,8 @@ snapshot appState args = do
     mainBranchCommit <- liftIO $ getMainBranchCommit appState
     let force = appState.settings.force
 
+    inputsAreClean <- liftIO $ not <$> isDirtyAtPaths appState args.fileInputs
+
     let hashInfo = HashInfo
           { hash = currentHash
           , hashInput = currentHashInput
@@ -446,8 +448,7 @@ snapshot appState args = do
       logDebug appState "Prime cache mode, assuming task is done and skippping!"
       earlyReturn (False, Nothing)
 
-
-    when (hasRemoteCache args && not force) do
+    when (hasRemoteCache args && not force && inputsAreClean) do
       s <- RemoteCache.getRemoteCacheSettingsFromEnv
       success <- liftIO $ RemoteCache.restoreCache appState s (fromMaybe appState.settings.rootDirectory args.cacheRoot) (archiveName appState args currentHash) RemoteCache.Log
       when success do

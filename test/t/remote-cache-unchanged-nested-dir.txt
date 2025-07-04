@@ -15,6 +15,7 @@ mkdir -p a
   cd nested
   echo foo > input.txt
   git add input.txt
+  git commit -qm "Add input.txt"
 )
 
 cp -r a b

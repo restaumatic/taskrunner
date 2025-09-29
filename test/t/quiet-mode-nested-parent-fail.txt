@@ -1,0 +1,6 @@
+# quiet
+echo "Toplevel output before nested call"
+taskrunner -n nested echo "Nested task succeeds"
+echo "Toplevel output after nested call"
+echo "This is the last line before failure"
+exit 1

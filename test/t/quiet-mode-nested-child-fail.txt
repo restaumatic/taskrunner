@@ -1,0 +1,4 @@
+# quiet
+echo "Toplevel output before nested call"
+taskrunner -n nested sh -c 'echo "Nested output before failure"; exit 1' || echo "Handling nested failure"
+echo "Toplevel continues after nested failure"

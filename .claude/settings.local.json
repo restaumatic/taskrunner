@@ -10,7 +10,8 @@
       "Bash(stack build:*)",
       "Bash(mkdir:*)",
       "Bash(git rev-parse:*)",
-      "Bash(git remote get-url:*)"
+      "Bash(git remote get-url:*)",
+      "Bash(git rebase:*)"
     ],
     "deny": [],
     "ask": []

@@ -5,10 +5,13 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(stack test)",
+      "Bash(stack test:*)",
       "Bash(find:*)",
-      "Bash(stack build:*)"
+      "Bash(stack build:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "ask": []
   }
 }
+

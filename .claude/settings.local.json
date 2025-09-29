@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(stack build)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(stack test)",
+      "Bash(find:*)",
+      "Bash(stack build:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -129,6 +129,9 @@ runTest fakeGithubServer source = do
                 , ("GITHUB_REPOSITORY_OWNER", "fakeowner")
                 , ("GITHUB_REPOSITORY", "fakerepo")
                 ] <>
+              mwhen options.quiet
+                [ ("TASKRUNNER_QUIET", "1")
+                ] <>
               s3ExtraEnv)
             , cwd = Just dir
             } \_ _ _ processHandle -> do
@@ -166,6 +169,7 @@ data Options = Options
   -- | Whether to provide GitHub app credentials in environment.
   -- If github status is disabled, taskrunner should work without them.
   , githubKeys :: Bool
+  , quiet :: Bool
   }
 
 instance Default Options where
@@ -174,6 +178,7 @@ instance Default Options where
     , toplevel = True
     , s3 = False
     , githubKeys = False
+    , quiet = False
     }
 
 getOptions :: Text -> Options
@@ -192,6 +197,9 @@ getOptions source = flip execState def $ go (lines source)
         go rest
       ["#", "github", "keys"] -> do
         modify (\s -> s { githubKeys = True })
+        go rest
+      ["#", "quiet"] -> do
+        modify (\s -> (s :: Options) { quiet = True })
         go rest
       -- TODO: validate?
       _ ->

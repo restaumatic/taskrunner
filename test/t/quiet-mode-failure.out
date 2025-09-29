@@ -1,0 +1,4 @@
+-- output:
+[toplevel] stdout | This output should be shown because the command fails
+[toplevel] stdout | Second line of output
+-- exit code: 1

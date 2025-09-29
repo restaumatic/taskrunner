@@ -19,6 +19,7 @@ data Settings = Settings
   , primeCacheMode :: Bool
   , mainBranch :: Maybe Text
   , force :: Bool
+  , quietMode :: Bool
   } deriving (Show)
 
 type JobName = String
@@ -49,7 +50,8 @@ data AppState = AppState
   , toplevelStderr :: Handle
   , subprocessStderr :: Handle
   , logOutput :: Handle
-  
+  , quietBuffer :: IORef [ByteString]
+
   -- | Lazily initialized Github client
   , githubClient :: IORef (Maybe GithubClient)
   }

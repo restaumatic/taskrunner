@@ -37,7 +37,10 @@ fakeGithubPort = 12345
 goldenTests :: IO TestTree
 goldenTests = do
   skipSlow <- (==Just "1") <$> lookupEnv "SKIP_SLOW_TESTS"
-  skipS3 <- (==Just "1") <$> lookupEnv "SKIP_S3_TESTS"
+  skipS3Explicit <- (==Just "1") <$> lookupEnv "SKIP_S3_TESTS"
+  hasS3Creds <- hasS3Credentials
+  let skipS3 = skipS3Explicit || not hasS3Creds
+
   inputFiles0 <- sort <$> findByExtension [".txt"] "test/t"
   inputFiles1 <- if skipS3
     then filterM (fmap not . hasS3Directive) inputFiles0
@@ -45,6 +48,23 @@ goldenTests = do
   let inputFiles
         | skipSlow = filter (\filename -> not ("/slow/" `isInfixOf` filename)) inputFiles1
         | otherwise = inputFiles1
+
+  -- Print informative message about what tests are running
+  let totalTests = length inputFiles0
+      s3Tests = length inputFiles0 - length inputFiles1
+      slowTests = length inputFiles1 - length inputFiles
+      runningTests = length inputFiles
+
+  when (skipS3 && s3Tests > 0) $ do
+    if skipS3Explicit
+      then System.IO.putStrLn $ "SKIP_S3_TESTS=1 - skipping " <> show s3Tests <> " S3-dependent tests"
+      else System.IO.putStrLn $ "S3 credentials not found - skipping " <> show s3Tests <> " S3-dependent tests"
+    System.IO.putStrLn $ "To run S3 tests, set: TASKRUNNER_TEST_S3_ENDPOINT, TASKRUNNER_TEST_S3_ACCESS_KEY, TASKRUNNER_TEST_S3_SECRET_KEY"
+
+  when (skipSlow && slowTests > 0) $
+    System.IO.putStrLn $ "SKIP_SLOW_TESTS=1 - skipping " <> show slowTests <> " slow tests"
+
+  System.IO.putStrLn $ "Running " <> show runningTests <> "/" <> show totalTests <> " tests"
   pure $ Tasty.withResource (FakeGithubApi.start fakeGithubPort) FakeGithubApi.stop \fakeGithubServer ->
     testGroup "tests"
       [ goldenVsStringDiff
@@ -223,3 +243,10 @@ hasS3Directive file = do
   content <- System.IO.readFile file
   let options = getOptions (toText content)
   pure options.s3
+
+hasS3Credentials :: IO Bool
+hasS3Credentials = do
+  endpoint <- lookupEnv "TASKRUNNER_TEST_S3_ENDPOINT"
+  accessKey <- lookupEnv "TASKRUNNER_TEST_S3_ACCESS_KEY"
+  secretKey <- lookupEnv "TASKRUNNER_TEST_S3_SECRET_KEY"
+  pure $ isJust endpoint && isJust accessKey && isJust secretKey

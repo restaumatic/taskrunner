@@ -37,10 +37,14 @@ fakeGithubPort = 12345
 goldenTests :: IO TestTree
 goldenTests = do
   skipSlow <- (==Just "1") <$> lookupEnv "SKIP_SLOW_TESTS"
+  skipS3 <- (==Just "1") <$> lookupEnv "SKIP_S3_TESTS"
   inputFiles0 <- sort <$> findByExtension [".txt"] "test/t"
+  inputFiles1 <- if skipS3
+    then filterM (fmap not . hasS3Directive) inputFiles0
+    else pure inputFiles0
   let inputFiles
-        | skipSlow = filter (\filename -> not ("/slow/" `isInfixOf` filename)) inputFiles0
-        | otherwise = inputFiles0
+        | skipSlow = filter (\filename -> not ("/slow/" `isInfixOf` filename)) inputFiles1
+        | otherwise = inputFiles1
   pure $ Tasty.withResource (FakeGithubApi.start fakeGithubPort) FakeGithubApi.stop \fakeGithubServer ->
     testGroup "tests"
       [ goldenVsStringDiff
@@ -213,3 +217,9 @@ maybeWithBucket Options{s3=True} block = do
 mwhen :: Monoid a => Bool -> a -> a
 mwhen True x = x
 mwhen False _ = mempty
+
+hasS3Directive :: FilePath -> IO Bool
+hasS3Directive file = do
+  content <- System.IO.readFile file
+  let options = getOptions (toText content)
+  pure options.s3

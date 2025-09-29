@@ -23,11 +23,19 @@ stack build
 
 ### Running Tests
 ```bash
-# Run all tests (may be slow)
+# Run all tests (may be slow, requires S3 setup)
 stack test
 
 # Run tests, skipping slow ones
 export SKIP_SLOW_TESTS=1
+stack test
+
+# Run tests, skipping S3 tests (recommended if no local S3/minio)
+export SKIP_S3_TESTS=1
+stack test
+
+# Skip both slow and S3 tests for fastest development
+export SKIP_SLOW_TESTS=1 SKIP_S3_TESTS=1
 stack test
 
 # Run specific test by pattern
@@ -75,6 +83,9 @@ stack test --test-arguments --accept
 ## Notes
 - This project uses tasty-golden for snapshot/golden file testing
 - The test suite includes integration tests that verify taskrunner behavior
-- Some tests require S3 credentials and GitHub API tokens (set via environment variables)
+- 15 tests require S3 credentials (marked with `# s3` directive in test files):
+  - Set `SKIP_S3_TESTS=1` to skip these tests if you don't have local S3/minio configured
+  - S3 tests require: `TASKRUNNER_TEST_S3_ENDPOINT`, `TASKRUNNER_TEST_S3_ACCESS_KEY`, `TASKRUNNER_TEST_S3_SECRET_KEY`
+- GitHub tests use a fake API server and don't require real GitHub credentials
 - The project uses Universum as an alternative Prelude
 - Build output and temporary files are in `.stack-work/`

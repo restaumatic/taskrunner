@@ -8,10 +8,11 @@
       "Bash(stack test:*)",
       "Bash(find:*)",
       "Bash(stack build:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git remote get-url:*)"
     ],
     "deny": [],
     "ask": []
   }
 }
-

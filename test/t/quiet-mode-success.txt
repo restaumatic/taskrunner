@@ -1,0 +1,3 @@
+# quiet
+echo "This output should be hidden in quiet mode because the command succeeds"
+echo "Second line of output"

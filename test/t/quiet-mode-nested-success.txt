@@ -1,0 +1,5 @@
+# quiet
+echo "Toplevel output (should be hidden)"
+taskrunner -n nested echo "Nested output (should also be hidden)"
+echo "More toplevel output (should be hidden)"
+taskrunner -n deeper sh -c 'echo "Deep nested (should be hidden)"'

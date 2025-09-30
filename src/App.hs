@@ -62,6 +62,7 @@ getSettings = do
   fuzzyCacheFallbackBranches <- maybe [] (Text.words . toText) <$> lookupEnv "TASKRUNNER_FALLBACK_BRANCHES"
   primeCacheMode <- (==Just "1") <$> lookupEnv "TASKRUNNER_PRIME_CACHE_MODE"
   mainBranch <- map toText <$> lookupEnv "TASKRUNNER_MAIN_BRANCH"
+  quietMode <- (==Just "1") <$> lookupEnv "TASKRUNNER_QUIET"
   pure Settings
         { stateDirectory
         , rootDirectory
@@ -76,6 +77,7 @@ getSettings = do
         , primeCacheMode
         , mainBranch
         , force = False
+        , quietMode
         }
 
 main :: IO ()
@@ -129,7 +131,7 @@ main = do
     -- Recursive: AppState is used before process is started (mostly for logging)
     rec
 
-      appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile
+      appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile <*> newIORef []
         <*> newIORef Nothing
 
       when (isToplevel && appState.settings.enableCommitStatus) do
@@ -170,6 +172,12 @@ main = do
     exitCode <- waitForProcess processHandle
 
     skipped <- readIORef appState.skipped
+
+    -- Handle quiet mode buffer based on exit code
+    when appState.settings.quietMode do
+      if exitCode == ExitSuccess
+        then discardQuietBuffer appState  -- Success: discard buffered output
+        else flushQuietBuffer appState toplevelStderr  -- Failure: show buffered output
 
     logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
     logDebugParent m_parentRequestPipe $ "Subtask " <> toText jobName <> " finished with " <> show exitCode

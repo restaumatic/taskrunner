@@ -1,0 +1,5 @@
+-- output:
+[toplevel] stdout | Toplevel output before nested call
+[toplevel] stdout | Toplevel output after nested call
+[toplevel] stdout | This is the last line before failure
+-- exit code: 1

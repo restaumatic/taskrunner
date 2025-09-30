@@ -1,0 +1,4 @@
+# quiet
+echo "This output should be shown because the command fails"
+echo "Second line of output"
+exit 1

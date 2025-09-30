@@ -35,7 +35,14 @@ outputLine appState toplevelOutput streamName line = do
           | otherwise = True
 
     when shouldOutputToToplevel do
-      B8.hPutStrLn toplevelOutput $ timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
+      let formattedLine = timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
+      if appState.settings.quietMode
+        then do
+          -- In quiet mode, add to buffer instead of outputting immediately
+          modifyIORef appState.quietBuffer (formattedLine :)
+        else
+          -- Normal mode: output immediately
+          B8.hPutStrLn toplevelOutput formattedLine
 
 logLevel :: MonadIO m => ByteString -> AppState -> Text -> m ()
 logLevel level appState msg =
@@ -121,3 +128,16 @@ getCurrentCommit _appState =
 
 logFileName :: Settings -> BuildId -> JobName -> FilePath
 logFileName settings buildId jobName = settings.stateDirectory </> "builds" </> toString buildId </> "logs" </> (jobName <> ".log")
+
+-- | Flush buffered output to terminal (used when task fails in quiet mode)
+flushQuietBuffer :: AppState -> Handle -> IO ()
+flushQuietBuffer appState toplevelOutput = do
+  buffer <- readIORef appState.quietBuffer
+  -- Output in correct order (buffer was built in reverse)
+  mapM_ (B8.hPutStrLn toplevelOutput) (reverse buffer)
+  -- Clear the buffer after flushing
+  writeIORef appState.quietBuffer []
+
+-- | Discard buffered output (used when task succeeds in quiet mode)
+discardQuietBuffer :: AppState -> IO ()
+discardQuietBuffer appState = writeIORef appState.quietBuffer []

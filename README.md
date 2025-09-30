@@ -144,13 +144,61 @@ The `snapshot` command supports the following flags:
 - `--long-running`: Indicates that the task is expected to run for a long time (e.g. a server). Currently doens't have any effect though, TODO: can we remove it?
 
 
-## Tests: Update Golden Files
+## Testing
 
 This project uses [tasty-golden](https://github.com/UnkindPartition/tasty-golden) for snapshot-based testing.
 
-To update the golden files, run the test suite with the `--accept` flag passed to the test executable.
-If you're using stack, the full command is:
+### Running Tests
 
-```sh
+```bash
+# Run all tests (auto-detects S3 credentials)
+stack test
+
+# Run tests, skipping slow ones for faster development
+export SKIP_SLOW_TESTS=1
+stack test
+
+# Run specific test by pattern
+stack test --test-arguments "--pattern hello"
+
+# List all available tests
+stack test --test-arguments "--list-tests"
+```
+
+### Test Structure
+
+Tests are located in `test/t/` directory with two files per test:
+- `.txt` file - Shell script to execute
+- `.out` file - Expected output (golden file)
+
+#### Test Directives
+
+Special comments in `.txt` files control test behavior:
+- `# check output` - Check stdout/stderr (default)
+- `# check github` - Check GitHub API calls
+- `# no toplevel` - Don't wrap in taskrunner
+- `# s3` - Requires S3 credentials (auto-skipped if missing)
+- `# github keys` - Provide GitHub credentials
+- `# quiet` - Run in quiet mode
+
+### S3 Test Auto-Detection
+
+15 tests require S3 credentials and are automatically skipped if credentials are missing.
+
+To run S3 tests, set these environment variables:
+```bash
+export TASKRUNNER_TEST_S3_ENDPOINT=your-s3-endpoint
+export TASKRUNNER_TEST_S3_ACCESS_KEY=your-access-key
+export TASKRUNNER_TEST_S3_SECRET_KEY=your-secret-key
+stack test
+```
+
+### Accepting Golden Test Changes
+
+When golden tests fail due to expected output changes:
+
+```bash
 stack test --test-arguments --accept
 ```
+
+This updates the `.out` files with new expected output. Review changes carefully before committing.

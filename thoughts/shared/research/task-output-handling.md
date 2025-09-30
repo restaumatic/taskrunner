@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document details how the taskrunner application handles output from tasks, including logging, streaming, and output annotation mechanisms.
+This document details how the taskrunner application handles output from tasks, including logging, streaming, output annotation mechanisms, and the quiet mode feature for agentic workflows.
 
 ## Architecture
 
@@ -11,15 +11,17 @@ The taskrunner uses a sophisticated multi-stream output handling system that:
 2. Annotates output with task names and timestamps
 3. Writes to both terminal and persistent log files
 4. Supports nested task execution with proper output routing
+5. Provides quiet mode for agentic workflows with conditional output display
 
 ## Core Components
 
 ### AppState Structure (`src/Types.hs`)
 
-The `AppState` contains three key output handles:
+The `AppState` contains four key output handles:
 - `toplevelStderr :: Handle` - Terminal output for the main process
 - `subprocessStderr :: Handle` - Error output for subprocess operations
 - `logOutput :: Handle` - File handle for persistent logging
+- `quietBuffer :: IORef [ByteString]` - Buffer for quiet mode output collection
 
 ### Output Processing Flow
 
@@ -65,6 +67,7 @@ The `outputLine` function is the core of output handling:
 3. **Task Name Annotation**: Prefixes output with `[jobName]`
 4. **Stream Identification**: Labels output as `stdout`, `stderr`, `debug`, `info`, etc.
 5. **Conditional Output**: Respects debug/info logging settings
+6. **Quiet Mode Buffering**: Conditionally buffers output based on task success/failure
 
 #### Format:
 - **Log file**: `{timestamp} {streamName} | {line}`
@@ -101,6 +104,46 @@ $TASKRUNNER_STATE_DIRECTORY/
 - **Binary mode** for proper encoding handling
 - **Automatic closure** when task completes
 
+## Quiet Mode Feature
+
+### Overview
+Quiet mode suppresses task output from the terminal unless the task fails, designed for agentic workflows to reduce noise and save tokens.
+
+### Behavior
+- **Success**: Task output buffered and discarded, no terminal output
+- **Failure**: Task output buffered and flushed to terminal for debugging
+- **Always**: All output still written to log files regardless of mode
+
+### Implementation (`src/Utils.hs:39-45`)
+```haskell
+if appState.settings.quietMode
+  then do
+    -- In quiet mode, add to buffer instead of outputting immediately
+    modifyIORef appState.quietBuffer (formattedLine :)
+  else
+    -- Normal mode: output immediately
+    B8.hPutStrLn toplevelOutput formattedLine
+```
+
+### Buffer Management (`src/Utils.hs:133-143`)
+- `flushQuietBuffer`: Outputs buffered content to terminal (on failure)
+- `discardQuietBuffer`: Clears buffer without output (on success)
+- Buffer stored in reverse order, flushed in correct chronological order
+
+### Exit Code Integration (`src/App.hs:176-180`)
+```haskell
+when appState.settings.quietMode do
+  if exitCode == ExitSuccess
+    then discardQuietBuffer appState  -- Success: discard buffered output
+    else flushQuietBuffer appState toplevelStderr  -- Failure: show buffered output
+```
+
+### Nested Task Behavior
+- Each taskrunner process maintains its own quiet buffer
+- Only the failing process flushes its buffer to terminal
+- Successful nested tasks remain quiet even when parent fails
+- Provides targeted debugging - shows output from exactly the failing component
+
 ## Output Control Settings
 
 ### Environment Variables
@@ -108,6 +151,7 @@ $TASKRUNNER_STATE_DIRECTORY/
 - `TASKRUNNER_LOG_INFO=1` - Include info messages in terminal output
 - `TASKRUNNER_DISABLE_TIMESTAMPS=1` - Disable timestamp prefixes
 - `TASKRUNNER_OUTPUT_STREAM_TIMEOUT=N` - Timeout for reading output streams
+- `TASKRUNNER_QUIET=1` - Enable quiet mode (suppress output unless task fails)
 
 ### Filtering Logic (`src/Utils.hs:32-38`)
 ```haskell
@@ -156,19 +200,22 @@ When `uploadLogs` is enabled:
 
 ## Key Design Principles
 
-1. **Real-time Output**: No buffering delays for user feedback
+1. **Real-time Output**: No buffering delays for user feedback (except in quiet mode)
 2. **Comprehensive Logging**: Everything logged for debugging
 3. **Nested Task Support**: Proper routing for complex workflows
 4. **Configurable Verbosity**: Users control output detail level
 5. **Parallel Safety**: Concurrent tasks don't interfere
 6. **Remote Integration**: Logs available for CI/CD analysis
+7. **Agentic Workflow Support**: Quiet mode for clean, token-efficient automation
 
 ## Implementation Notes
 
 ### Code Locations
 - Main logic: `src/App.hs` (lines 147-168, 353-357)
-- Output formatting: `src/Utils.hs` (lines 18-38)
-- Type definitions: `src/Types.hs` (lines 41-55)
+- Output formatting: `src/Utils.hs` (lines 18-45)
+- Quiet mode buffer management: `src/Utils.hs` (lines 133-143)
+- Exit code integration: `src/App.hs` (lines 176-180)
+- Type definitions: `src/Types.hs` (lines 41-57)
 - Log utilities: `src/Utils.hs` (lines 122-123)
 
 ### Dependencies
@@ -181,4 +228,6 @@ When `uploadLogs` is enabled:
 - Line-by-line processing minimizes memory usage
 - Binary mode avoids encoding overhead
 - Async handlers prevent stream blocking
-- Buffering disabled for real-time output
+- Buffering disabled for real-time output (except quiet mode)
+- Quiet mode buffer size naturally limited by task output volume
+- Buffer memory freed immediately after task completion

@@ -30,14 +30,6 @@ stack test
 export SKIP_SLOW_TESTS=1
 stack test
 
-# Explicitly skip S3 tests even if credentials are present
-export SKIP_S3_TESTS=1
-stack test
-
-# Skip both slow and S3 tests for fastest development
-export SKIP_SLOW_TESTS=1 SKIP_S3_TESTS=1
-stack test
-
 # Run specific test by pattern
 stack test --test-arguments "--pattern hello"
 
@@ -86,7 +78,6 @@ stack test --test-arguments --accept
 - **S3 Test Auto-Detection**: 15 tests require S3 credentials (marked with `# s3` directive in test files)
   - `stack test` automatically skips S3 tests if credentials are missing
   - To run S3 tests, set: `TASKRUNNER_TEST_S3_ENDPOINT`, `TASKRUNNER_TEST_S3_ACCESS_KEY`, `TASKRUNNER_TEST_S3_SECRET_KEY`
-  - Use `SKIP_S3_TESTS=1` to explicitly skip S3 tests even when credentials are present
 - GitHub tests use a fake API server and don't require real GitHub credentials
 - The project uses Universum as an alternative Prelude
 - Build output and temporary files are in `.stack-work/`

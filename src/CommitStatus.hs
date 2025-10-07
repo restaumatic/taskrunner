@@ -27,6 +27,13 @@ data StatusRequest = StatusRequest
   } deriving (Show, Generic)
   deriving anyclass (ToJSON)
 
+-- Define the data type for parsing status responses
+data StatusResponse = StatusResponse
+  { context :: T.Text
+  , state   :: T.Text
+  } deriving (Show, Generic)
+  deriving anyclass (FromJSON)
+
 -- Define the data type for the installation token response
 newtype InstallationTokenResponse = InstallationTokenResponse
   { token :: T.Text
@@ -135,3 +142,36 @@ updateCommitStatus appState statusRequest = liftIO do
       logError appState $ "CommitStatus: Failed to update commit status: " <> show statusResponse
       logError appState $ "CommitStatus: Response: " <> decodeUtf8 statusResponse.responseBody
       exitFailure
+
+-- Check if a status exists for the current commit and context
+checkExistingStatus :: MonadIO m => AppState -> T.Text -> m Bool
+checkExistingStatus appState contextName = liftIO do
+  client <- getClient appState
+  sha <- getCurrentCommit appState
+
+  -- Prepare the GET request for statuses
+  let statusUrl = toString client.apiUrl <> "/repos/" ++ toString client.owner ++ "/" ++ toString client.repo ++ "/commits/" ++ toString sha ++ "/statuses"
+  initStatusRequest <- HTTP.parseRequest statusUrl
+  let statusReq = initStatusRequest
+                  { HTTP.method = "GET"
+                  , HTTP.requestHeaders =
+                      [ ("Authorization", "Bearer " <> TE.encodeUtf8 client.accessToken)
+                      , ("Accept", "application/vnd.github.v3+json")
+                      , ("User-Agent", "restaumatic-bot")
+                      ]
+                  }
+  statusResponse <- HTTP.httpLbs statusReq client.manager
+  if statusResponse.responseStatus.statusCode == 200
+    then do
+      let mStatuses = eitherDecode @[StatusResponse] (HTTP.responseBody statusResponse)
+      case mStatuses of
+        Left err -> do
+          logDebug appState $ "CommitStatus: Failed to parse statuses response: " <> show err
+          pure False
+        Right statuses -> do
+          let hasContext = any (\s -> s.context == contextName) statuses
+          logDebug appState $ "CommitStatus: Found existing status for context " <> contextName <> ": " <> show hasContext
+          pure hasContext
+    else do
+      logDebug appState $ "CommitStatus: Failed to get commit statuses: " <> show statusResponse.responseStatus.statusCode
+      pure False

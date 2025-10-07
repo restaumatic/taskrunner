@@ -1,0 +1,8 @@
+-- output:
+[mytask] stdout | FAIL
+[mytask] stdout | SUCCESS
+-- github:
+Requested access token for installation 123
+Updated commit status for fakeowner/fakerepo to {"context":"mytask","description":null,"state":"failure","target_url":null}
+Requested access token for installation 123
+Updated commit status for fakeowner/fakerepo to {"context":"mytask","description":null,"state":"success","target_url":null}

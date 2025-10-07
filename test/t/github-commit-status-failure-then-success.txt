@@ -1,0 +1,21 @@
+# check output github
+# no toplevel
+# github keys
+
+export TASKRUNNER_ENABLE_COMMIT_STATUS=1
+
+git init -q
+git commit --allow-empty -q -m "Initial commit"
+
+# First run: task fails, status should be posted
+taskrunner -n mytask bash -e -c '
+  snapshot -n
+  echo FAIL
+  exit 1
+' || true
+
+# Second run: task succeeds, status should be updated to success
+taskrunner -n mytask bash -e -c '
+  snapshot -n
+  echo SUCCESS
+'

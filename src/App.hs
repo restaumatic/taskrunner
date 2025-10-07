@@ -39,7 +39,7 @@ import Types
 import Utils
 import qualified RemoteCache
 import RemoteCache (getLatestBuildHash)
-import CommitStatus (updateCommitStatus, StatusRequest (..))
+import CommitStatus (updateCommitStatus, StatusRequest (..), checkExistingStatus)
 import qualified CommitStatus
 import qualified System.Process as Process
 import Control.Monad.EarlyReturn (withEarlyReturn, earlyReturn)
@@ -225,7 +225,14 @@ main = do
 
     cancel cmdHandler
 
-    let shouldReportStatus = (maybe False (.commitStatus) m_snapshotArgs && not skipped) || not isSuccess
+    -- Check if there's an existing status for this task/commit
+    hasExistingStatus <-
+      if appState.settings.enableCommitStatus then
+        checkExistingStatus appState (toText appState.jobName)
+      else
+        pure False
+
+    let shouldReportStatus = (maybe False (.commitStatus) m_snapshotArgs && not skipped) || not isSuccess || hasExistingStatus
 
     hClose logFile
 

@@ -4,6 +4,7 @@
 # github token lifetime 2
 
 export TASKRUNNER_ENABLE_COMMIT_STATUS=1
+export TASKRUNNER_GITHUB_TOKEN_REFRESH_THRESHOLD_SECONDS=1
 
 git init -q
 git commit --allow-empty -q -m "Initial commit"

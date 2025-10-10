@@ -63,6 +63,7 @@ getSettings = do
   primeCacheMode <- (==Just "1") <$> lookupEnv "TASKRUNNER_PRIME_CACHE_MODE"
   mainBranch <- map toText <$> lookupEnv "TASKRUNNER_MAIN_BRANCH"
   quietMode <- (==Just "1") <$> lookupEnv "TASKRUNNER_QUIET"
+  githubTokenRefreshThresholdSeconds <- maybe 300 read <$> lookupEnv "TASKRUNNER_GITHUB_TOKEN_REFRESH_THRESHOLD_SECONDS"
   pure Settings
         { stateDirectory
         , rootDirectory
@@ -78,6 +79,7 @@ getSettings = do
         , mainBranch
         , force = False
         , quietMode
+        , githubTokenRefreshThresholdSeconds
         }
 
 main :: IO ()

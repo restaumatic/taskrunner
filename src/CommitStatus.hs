@@ -78,7 +78,8 @@ getClient appState = do
     Just client -> do
       -- Fast path: check if cached token is still valid
       now <- getCurrentTime
-      if diffUTCTime client.expiresAt now >= 300
+      let threshold = fromIntegral appState.settings.githubTokenRefreshThresholdSeconds
+      if diffUTCTime client.expiresAt now >= threshold
         then pure client
         else do
           -- Token expiring, need to refresh
@@ -92,6 +93,7 @@ loadOrRefreshClient :: AppState -> IO GithubClient
 loadOrRefreshClient appState = do
   let cacheFile = credentialsCacheFile appState.settings
   let lockFile = cacheFile <> ".lock"
+  let threshold = fromIntegral appState.settings.githubTokenRefreshThresholdSeconds
 
   client <- withFileLock lockFile Exclusive \_ -> do
     -- Under EXCLUSIVE lock: read, check, refresh if needed
@@ -100,7 +102,7 @@ loadOrRefreshClient appState = do
     now <- getCurrentTime
     case mCached of
       Just (cachedToken, expiresAt)
-        | diffUTCTime expiresAt now >= 300 -> do
+        | diffUTCTime expiresAt now >= threshold -> do
             -- Valid cached token
             logDebug appState "Using cached GitHub token from file"
             buildClientWithToken appState cachedToken expiresAt

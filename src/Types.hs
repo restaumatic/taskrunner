@@ -21,6 +21,7 @@ data Settings = Settings
   , mainBranch :: Maybe Text
   , force :: Bool
   , quietMode :: Bool
+  , githubTokenRefreshThresholdSeconds :: Int
   } deriving (Show)
 
 type JobName = String

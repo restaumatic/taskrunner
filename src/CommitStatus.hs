@@ -56,66 +56,86 @@ data CredentialsCache = CredentialsCache
 credentialsCacheFile :: Settings -> FilePath
 credentialsCacheFile settings = settings.stateDirectory <> "/.github-token-cache.json"
 
-readCredentialsCache :: Settings -> IO (Maybe (T.Text, UTCTime))
-readCredentialsCache settings = do
-  let cacheFile = credentialsCacheFile settings
+-- Try to read cache file (no locking - caller should hold lock)
+tryReadCache :: FilePath -> IO (Maybe (T.Text, UTCTime))
+tryReadCache cacheFile = do
   exists <- doesFileExist cacheFile
   if exists then do
     result <- eitherDecodeFileStrict @CredentialsCache cacheFile
     case result of
       Left _ -> pure Nothing
-      Right cache -> do
+      Right cache ->
         case iso8601ParseM (toString cache.cachedExpiresAt) of
           Just expiresAt -> pure $ Just (cache.cachedToken, expiresAt)
           Nothing -> pure Nothing
   else
     pure Nothing
 
-writeCredentialsCache :: Settings -> T.Text -> UTCTime -> IO ()
-writeCredentialsCache settings token expiresAt = do
-  let cacheFile = credentialsCacheFile settings
-  let lockFile = cacheFile <> ".lock"
-  let cache = CredentialsCache
-        { cachedToken = token
-        , cachedExpiresAt = T.pack $ iso8601Show expiresAt
-        }
-  withFileLock lockFile Exclusive \_ ->
-    BL.writeFile cacheFile (encode cache)
-
 getClient :: AppState -> IO GithubClient
 getClient appState = do
   mClient <- readIORef appState.githubClient
   case mClient of
     Just client -> do
-      -- Check if token is expired or expiring soon (within 5 minutes)
+      -- Fast path: check if cached token is still valid
       now <- getCurrentTime
-      let secondsUntilExpiry = diffUTCTime client.expiresAt now
-      if secondsUntilExpiry < 300 then do
-        logDebug appState $ "GitHub token expired or expiring soon (in " <> show (floor secondsUntilExpiry :: Int) <> "s), refreshing..."
-        writeIORef appState.githubClient Nothing
-        getClient appState
-      else
-        pure client
-    Nothing -> do
-      -- Try reading from cache file first (for child processes)
-      mCached <- readCredentialsCache appState.settings
-      case mCached of
-        Just (cachedToken, expiresAt) -> do
-          now <- getCurrentTime
-          let secondsUntilExpiry = diffUTCTime expiresAt now
-          if secondsUntilExpiry < 300 then do
-            -- Cached token is expired, create new one
-            logDebug appState "Cached GitHub token expired, creating new one"
-            initClient appState
-          else do
-            -- Use cached token, build client
+      if diffUTCTime client.expiresAt now >= 300
+        then pure client
+        else do
+          -- Token expiring, need to refresh
+          logDebug appState $ "GitHub token expired or expiring soon (in " <> show (floor (diffUTCTime client.expiresAt now) :: Int) <> "s), refreshing..."
+          writeIORef appState.githubClient Nothing
+          loadOrRefreshClient appState
+    Nothing ->
+      loadOrRefreshClient appState
+
+loadOrRefreshClient :: AppState -> IO GithubClient
+loadOrRefreshClient appState = do
+  let cacheFile = credentialsCacheFile appState.settings
+  let lockFile = cacheFile <> ".lock"
+
+  client <- withFileLock lockFile Exclusive \_ -> do
+    -- Under EXCLUSIVE lock: read, check, refresh if needed
+    mCached <- tryReadCache cacheFile
+
+    now <- getCurrentTime
+    case mCached of
+      Just (cachedToken, expiresAt)
+        | diffUTCTime expiresAt now >= 300 -> do
+            -- Valid cached token
             logDebug appState "Using cached GitHub token from file"
-            client <- buildClientWithToken appState cachedToken expiresAt
-            writeIORef appState.githubClient (Just client)
-            pure client
-        Nothing -> do
-          -- No cache, create new token
-          initClient appState
+            buildClientWithToken appState cachedToken expiresAt
+        | otherwise -> do
+            -- Expired token, refresh
+            logDebug appState "Cached token expired, refreshing"
+            refreshToken appState cacheFile
+      Nothing -> do
+        -- No cache, create new token
+        logDebug appState "No cached token, creating new one"
+        refreshToken appState cacheFile
+
+  writeIORef appState.githubClient (Just client)
+  pure client
+
+-- Create new token and write to cache (caller should hold EXCLUSIVE lock)
+refreshToken :: AppState -> FilePath -> IO GithubClient
+refreshToken appState cacheFile = do
+  tokenResponse <- createTokenFromGitHub appState
+
+  expiresAt <- case iso8601ParseM (toString tokenResponse.expires_at) of
+    Just t -> pure t
+    Nothing -> do
+      logError appState $ "CommitStatus: Failed to parse expires_at: " <> tokenResponse.expires_at
+      exitFailure
+
+  -- Write to cache (already under EXCLUSIVE lock, no additional locking needed)
+  let cache = CredentialsCache
+        { cachedToken = tokenResponse.token
+        , cachedExpiresAt = T.pack $ iso8601Show expiresAt
+        }
+  BL.writeFile cacheFile (encode cache)
+
+  -- Build and return client
+  buildClientWithToken appState tokenResponse.token expiresAt
 
 buildClientWithToken :: AppState -> T.Text -> UTCTime -> IO GithubClient
 buildClientWithToken _appState accessToken expiresAt = do
@@ -140,80 +160,50 @@ buildClientWithToken _appState accessToken expiresAt = do
     , expiresAt = expiresAt
     }
 
-initClient :: AppState -> IO GithubClient
-initClient appState = do
+-- Create a new GitHub App installation token from GitHub API
+createTokenFromGitHub :: AppState -> IO InstallationTokenResponse
+createTokenFromGitHub appState = do
   -- Load environment variables
   apiUrl <- fromMaybe "https://api.github.com" <$> lookupEnv "GITHUB_API_URL"
   appId <- getEnv "GITHUB_APP_ID"
   installationId <- getEnv "GITHUB_INSTALLATION_ID"
   privateKeyStr <- getEnv "GITHUB_APP_PRIVATE_KEY"
-  owner <- getEnv "GITHUB_REPOSITORY_OWNER"
-  repo <- getEnv "GITHUB_REPOSITORY"
+
   -- Prepare the HTTP manager
   manager <- HTTP.newManager tlsManagerSettings
 
-  let createToken = do
-        let privateKeyBytes = encodeUtf8 $ Text.replace "|" "\n" $ toText privateKeyStr
-        let privateKey = fromMaybe (error "Invalid github key") $ readRsaSecret privateKeyBytes
+  let privateKeyBytes = encodeUtf8 $ Text.replace "|" "\n" $ toText privateKeyStr
+  let privateKey = fromMaybe (error "Invalid github key") $ readRsaSecret privateKeyBytes
 
-        -- Create the JWT token
-        now <- getPOSIXTime
-        let claims = mempty { iss = stringOrURI $ T.pack appId
-                         , iat = numericDate now
-                         , exp = numericDate (now + 5 * 60)
-                         }
-        let jwt = encodeSigned (EncodeRSAPrivateKey privateKey) (mempty { alg = Just RS256 }) claims
+  -- Create the JWT token
+  now <- getPOSIXTime
+  let claims = mempty { iss = stringOrURI $ T.pack appId
+                   , iat = numericDate now
+                   , exp = numericDate (now + 5 * 60)
+                   }
+  let jwt = encodeSigned (EncodeRSAPrivateKey privateKey) (mempty { alg = Just RS256 }) claims
 
-        -- Get the installation access token
-        let installUrl = apiUrl <> "/app/installations/" ++ installationId ++ "/access_tokens"
-        initRequest <- HTTP.parseRequest installUrl
-        let request = initRequest
-                      { HTTP.method = "POST"
-                      , HTTP.requestHeaders =
-                          [ ("Authorization", "Bearer " <> TE.encodeUtf8 jwt)
-                          , ("Accept", "application/vnd.github.v3+json")
-                          , ("User-Agent", "restaumatic-bot")
-                          ]
-                      }
-        response <- HTTP.httpLbs request manager
-        let mTokenResponse = eitherDecode @InstallationTokenResponse (HTTP.responseBody response)
-        case mTokenResponse of
-          Left err -> do
-            logError appState $ "CommitStatus: Failed to parse installation token response: " <> show err
-            logError appState $ "CommitStatus: Response: " <> decodeUtf8 response.responseBody
-
-            -- FIXME: handle the error better
-            exitFailure
-          Right tokenResponse ->
-            pure tokenResponse
-
-  -- Create new token
-  tokenResponse <- createToken
-
-  -- Parse expires_at to UTCTime
-  expiresAt <- case iso8601ParseM (toString tokenResponse.expires_at) of
-    Just t -> pure t
-    Nothing -> do
-      logError appState $ "CommitStatus: Failed to parse expires_at: " <> tokenResponse.expires_at
+  -- Get the installation access token
+  let installUrl = apiUrl <> "/app/installations/" ++ installationId ++ "/access_tokens"
+  initRequest <- HTTP.parseRequest installUrl
+  let request = initRequest
+                { HTTP.method = "POST"
+                , HTTP.requestHeaders =
+                    [ ("Authorization", "Bearer " <> TE.encodeUtf8 jwt)
+                    , ("Accept", "application/vnd.github.v3+json")
+                    , ("User-Agent", "restaumatic-bot")
+                    ]
+                }
+  response <- HTTP.httpLbs request manager
+  let mTokenResponse = eitherDecode @InstallationTokenResponse (HTTP.responseBody response)
+  case mTokenResponse of
+    Left err -> do
+      logError appState $ "CommitStatus: Failed to parse installation token response: " <> show err
+      logError appState $ "CommitStatus: Response: " <> decodeUtf8 response.responseBody
+      -- FIXME: handle the error better
       exitFailure
-
-  -- Write to cache file for child processes
-  writeCredentialsCache appState.settings tokenResponse.token expiresAt
-
-  let client = GithubClient
-        { apiUrl = T.pack apiUrl
-        , appId = T.pack appId
-        , installationId = T.pack installationId
-        , privateKey = T.pack privateKeyStr
-        , owner = T.pack owner
-        , repo = T.pack repo
-        , manager = manager
-        , accessToken = tokenResponse.token
-        , expiresAt = expiresAt
-        }
-
-  writeIORef appState.githubClient (Just client)
-  pure client
+    Right tokenResponse ->
+      pure tokenResponse
 
 updateCommitStatus :: MonadIO m => AppState -> StatusRequest -> m ()
 updateCommitStatus appState statusRequest = liftIO do

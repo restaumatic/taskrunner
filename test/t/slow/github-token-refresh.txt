@@ -10,8 +10,7 @@ git commit --allow-empty -q -m "Initial commit"
 
 taskrunner -n mytask bash -e -c '
   snapshot -n --commit-status
-  echo "First status update done"
+  echo "Task started, pending status posted"
   sleep 3
-  snapshot -n --commit-status
-  echo "Second status update done (token refreshed)"
+  echo "Task finishing (token will be refreshed for final status)"
 '

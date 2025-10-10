@@ -87,6 +87,10 @@ runTest fakeGithubServer source = do
   withSystemTempDirectory "testrunner-test" \dir -> do
     let options = getOptions (toText source)
 
+    -- Set token lifetime if specified in test
+    whenJust options.githubTokenLifetime $ \lifetime ->
+      FakeGithubApi.setTokenLifetime fakeGithubServer lifetime
+
     (pipeRead, pipeWrite) <- createPipe
     path <- getEnv "PATH"
 
@@ -170,6 +174,7 @@ data Options = Options
   -- If github status is disabled, taskrunner should work without them.
   , githubKeys :: Bool
   , quiet :: Bool
+  , githubTokenLifetime :: Maybe Int
   }
 
 instance Default Options where
@@ -179,6 +184,7 @@ instance Default Options where
     , s3 = False
     , githubKeys = False
     , quiet = False
+    , githubTokenLifetime = Nothing
     }
 
 getOptions :: Text -> Options
@@ -197,6 +203,9 @@ getOptions source = flip execState def $ go (lines source)
         go rest
       ["#", "github", "keys"] -> do
         modify (\s -> s { githubKeys = True })
+        go rest
+      ["#", "github", "token", "lifetime", n] -> do
+        modify (\s -> s { githubTokenLifetime = readMaybe (toString n) })
         go rest
       ["#", "quiet"] -> do
         modify (\s -> (s :: Options) { quiet = True })

@@ -1,0 +1,17 @@
+# check output github
+# no toplevel
+# github keys
+# github token lifetime 2
+
+export TASKRUNNER_ENABLE_COMMIT_STATUS=1
+
+git init -q
+git commit --allow-empty -q -m "Initial commit"
+
+taskrunner -n mytask bash -e -c '
+  snapshot -n --commit-status
+  echo "First status update done"
+  sleep 3
+  snapshot -n --commit-status
+  echo "Second status update done (token refreshed)"
+'

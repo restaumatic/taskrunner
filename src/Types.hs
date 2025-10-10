@@ -4,6 +4,7 @@ import Universum
 import SnapshotCliArgs (SnapshotCliArgs)
 import Data.Aeson (FromJSON, ToJSON)
 import qualified Network.HTTP.Client as HTTP
+import Data.Time.Clock (UTCTime)
 
 data Settings = Settings
   { stateDirectory :: FilePath
@@ -20,6 +21,7 @@ data Settings = Settings
   , mainBranch :: Maybe Text
   , force :: Bool
   , quietMode :: Bool
+  , githubTokenRefreshThresholdSeconds :: Int
   } deriving (Show)
 
 type JobName = String
@@ -66,4 +68,5 @@ data GithubClient = GithubClient
   , repo :: Text
   , manager :: HTTP.Manager
   , accessToken :: Text
+  , expiresAt :: UTCTime
   }

@@ -1,0 +1,8 @@
+-- output:
+[mytask] stdout | Task started, pending status posted
+[mytask] stdout | Task finishing (token will be refreshed for final status)
+-- github:
+Requested access token for installation 123
+Updated commit status for fakeowner/fakerepo to {"context":"mytask","description":"not cached","state":"pending","target_url":null}
+Requested access token for installation 123
+Updated commit status for fakeowner/fakerepo to {"context":"mytask","description":null,"state":"success","target_url":null}

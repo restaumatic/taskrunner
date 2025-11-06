@@ -106,7 +106,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts/taskrunner-linux-x86_64/taskrunner-linux.tar.gz
+        asset_path: ./artifacts/taskrunner-linux-x86_64/dist/taskrunner-linux.tar.gz
         asset_name: taskrunner-linux.tar.gz
         asset_content_type: application/x-tar
 
@@ -117,7 +117,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts/taskrunner-linux-x86_64/taskrunner-linux-x86_64.tar.gz
+        asset_path: ./artifacts/taskrunner-linux-x86_64/dist/taskrunner-linux-x86_64.tar.gz
         asset_name: taskrunner-linux-x86_64.tar.gz
         asset_content_type: application/x-tar
 
@@ -128,6 +128,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts/taskrunner-linux-arm64/taskrunner-linux-arm64.tar.gz
+        asset_path: ./artifacts/taskrunner-linux-arm64/dist/taskrunner-linux-arm64.tar.gz
         asset_name: taskrunner-linux-arm64.tar.gz
         asset_content_type: application/x-tar

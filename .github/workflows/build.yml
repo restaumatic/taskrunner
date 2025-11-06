@@ -4,7 +4,14 @@ on: [push]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
     - name: start service container
       run: |
@@ -27,11 +34,11 @@ jobs:
         cache-name: cache-stack
       with:
         path: ~/.stack
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/stack.yaml') }}
+        key: ${{ runner.os }}-${{ matrix.arch }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/stack.yaml') }}
         restore-keys: |
-          ${{ runner.os }}-build-${{ env.cache-name }}-
-          ${{ runner.os }}-build-
-          ${{ runner.os }}-
+          ${{ runner.os }}-${{ matrix.arch }}-build-${{ env.cache-name }}-
+          ${{ runner.os }}-${{ matrix.arch }}-build-
+          ${{ runner.os }}-${{ matrix.arch }}-
     - name: Build dependencies
       run: |
         stack --no-terminal build --test --only-dependencies
@@ -46,13 +53,18 @@ jobs:
         export TASKRUNNER_TEST_S3_SECRET_KEY=minioadmin
 
         stack --no-terminal build --test
-    - name: Zip
+    - name: Package
       run: |
         cd dist
-        tar czvf taskrunner-linux.tar.gz taskrunner
+        # Create architecture-specific archive
+        tar czvf taskrunner-linux-${{ matrix.arch }}.tar.gz taskrunner
+        # For x86_64, also create legacy name for backward compatibility
+        if [ "${{ matrix.arch }}" == "x86_64" ]; then
+          cp taskrunner-linux-${{ matrix.arch }}.tar.gz taskrunner-linux.tar.gz
+        fi
     - name: Archive production artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: taskrunner-linux.tar.gz
+        name: taskrunner-linux-${{ matrix.arch }}
         path: |
-          dist/taskrunner-linux.tar.gz
+          dist/*.tar.gz

@@ -10,7 +10,14 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
     - name: start service container
       run: |
@@ -33,11 +40,11 @@ jobs:
         cache-name: cache-stack
       with:
         path: ~/.stack
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/stack.yaml') }}
+        key: ${{ runner.os }}-${{ matrix.arch }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/stack.yaml') }}
         restore-keys: |
-          ${{ runner.os }}-build-${{ env.cache-name }}-
-          ${{ runner.os }}-build-
-          ${{ runner.os }}-
+          ${{ runner.os }}-${{ matrix.arch }}-build-${{ env.cache-name }}-
+          ${{ runner.os }}-${{ matrix.arch }}-build-
+          ${{ runner.os }}-${{ matrix.arch }}-
     - name: Build dependencies
       run: |
         stack --no-terminal build --test --only-dependencies
@@ -52,10 +59,35 @@ jobs:
         export TASKRUNNER_TEST_S3_SECRET_KEY=minioadmin
 
         stack --no-terminal build --test
-    - name: Zip
+    - name: Package
       run: |
         cd dist
-        tar czvf taskrunner-linux.tar.gz taskrunner
+        # Create architecture-specific archive
+        tar czvf taskrunner-linux-${{ matrix.arch }}.tar.gz taskrunner
+        # For x86_64, also create legacy name for backward compatibility
+        if [ "${{ matrix.arch }}" == "x86_64" ]; then
+          cp taskrunner-linux-${{ matrix.arch }}.tar.gz taskrunner-linux.tar.gz
+        fi
+    # Upload artifacts from both architecture builds
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: taskrunner-linux-${{ matrix.arch }}
+        path: |
+          dist/*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: List artifacts
+      run: ls -laR artifacts/
+
     - name: Create Release
       id: create_release
       uses: actions/create-release@v1
@@ -66,13 +98,36 @@ jobs:
         release_name: Release ${{ github.ref_name }}
         draft: false
         prerelease: false
-    - name: Upload Release Asset
-      id: upload-release-asset
+
+    # Upload x86_64 with legacy name (backward compatibility)
+    - name: Upload Release Asset (Linux - Legacy)
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
-        asset_path: ./dist/taskrunner-linux.tar.gz
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/taskrunner-linux-x86_64/dist/taskrunner-linux.tar.gz
         asset_name: taskrunner-linux.tar.gz
+        asset_content_type: application/x-tar
+
+    # Upload x86_64 with explicit architecture
+    - name: Upload Release Asset (Linux x86_64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/taskrunner-linux-x86_64/dist/taskrunner-linux-x86_64.tar.gz
+        asset_name: taskrunner-linux-x86_64.tar.gz
+        asset_content_type: application/x-tar
+
+    # Upload ARM64
+    - name: Upload Release Asset (Linux ARM64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/taskrunner-linux-arm64/dist/taskrunner-linux-arm64.tar.gz
+        asset_name: taskrunner-linux-arm64.tar.gz
         asset_content_type: application/x-tar

@@ -91,6 +91,10 @@ runTest fakeGithubServer source = do
     whenJust options.githubTokenLifetime $ \lifetime ->
       FakeGithubApi.setTokenLifetime fakeGithubServer lifetime
 
+    -- Set token expiration offset if specified in test
+    whenJust options.githubTokenExpirationOffset $ \offset ->
+      FakeGithubApi.setTokenExpirationOffset fakeGithubServer offset
+
     (pipeRead, pipeWrite) <- createPipe
     path <- getEnv "PATH"
 
@@ -175,6 +179,7 @@ data Options = Options
   , githubKeys :: Bool
   , quiet :: Bool
   , githubTokenLifetime :: Maybe Int
+  , githubTokenExpirationOffset :: Maybe Int
   }
 
 instance Default Options where
@@ -185,6 +190,7 @@ instance Default Options where
     , githubKeys = False
     , quiet = False
     , githubTokenLifetime = Nothing
+    , githubTokenExpirationOffset = Nothing
     }
 
 getOptions :: Text -> Options
@@ -206,6 +212,9 @@ getOptions source = flip execState def $ go (lines source)
         go rest
       ["#", "github", "token", "lifetime", n] -> do
         modify (\s -> s { githubTokenLifetime = readMaybe (toString n) })
+        go rest
+      ["#", "github", "token", "expiration", "offset", n] -> do
+        modify (\s -> s { githubTokenExpirationOffset = readMaybe (toString n) })
         go rest
       ["#", "quiet"] -> do
         modify (\s -> (s :: Options) { quiet = True })

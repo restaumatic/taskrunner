@@ -2,3 +2,4 @@
 [mytask] info | Inputs changed, running task
 [mytask] stdout | Expensive computation, input is: lol
 [mytask] info | success
+[mytask] info | skipped, inputs unchanged

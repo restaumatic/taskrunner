@@ -1,5 +1,5 @@
 -- output:
 [mytask] info | Inputs changed, running task
-[mytask] stdout | Expensive computation
+[mytask] stdout | Running task
 [mytask] info | success
 [mytask] info | skipped, inputs unchanged

@@ -4,3 +4,4 @@
 ghtest-env
 .aider*
 thoughts/
+.claude/worktrees/

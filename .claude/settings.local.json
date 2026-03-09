@@ -11,7 +11,10 @@
       "Bash(mkdir:*)",
       "Bash(git rev-parse:*)",
       "Bash(git remote get-url:*)",
-      "Bash(git rebase:*)"
+      "Bash(git rebase:*)",
+      "Bash(git show:*)",
+      "Bash(ls:*)",
+      "Bash(SKIP_SLOW_TESTS=1 SKIP_S3_TESTS=1 stack test:*)"
     ],
     "deny": [],
     "ask": []

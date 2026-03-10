@@ -1,0 +1,4 @@
+-- output:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Running task
+[mytask] info | success

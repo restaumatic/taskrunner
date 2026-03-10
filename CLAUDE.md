@@ -63,6 +63,7 @@ stack test --test-arguments --accept
   - `# no toplevel` - don't wrap in taskrunner
   - `# s3` - enable S3 testing
   - `# github keys` - provide GitHub credentials
+- When testing toplevel vs subtask behavior, use real nesting (default toplevel wrapping + inner `taskrunner` calls) rather than manually setting internal env vars like `_taskrunner_build_id`
 
 ## Key Commands for Development
 

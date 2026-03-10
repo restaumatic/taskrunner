@@ -186,6 +186,9 @@ main = do
 
     m_hashToSave <- readIORef appState.hashToSaveRef
 
+    when (skipped && isNothing m_hashToSave && appState.isToplevel) do
+      logInfo appState "skipped, inputs unchanged"
+
     -- Only be chatty about exit status if we were chatty about starting the work, i.e. if it is cacheable.
     when (not skipped && isJust m_hashToSave) do
       if exitCode == ExitSuccess then

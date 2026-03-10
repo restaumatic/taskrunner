@@ -7,3 +7,4 @@ should compute again:
 [mytask] stdout | Expensive computation
 [mytask] info | success
 should not compute again:
+[mytask] info | skipped, inputs unchanged

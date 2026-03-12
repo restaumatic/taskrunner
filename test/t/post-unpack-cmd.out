@@ -1,0 +1,6 @@
+-- output:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Main task output
+[mytask] info | success
+taskrunner: <file descriptor: 26>: hDuplicate: invalid argument (Bad file descriptor)
+-- exit code: 1

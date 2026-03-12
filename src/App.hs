@@ -181,6 +181,17 @@ main = do
         then discardQuietBuffer appState  -- Success: discard buffered output
         else flushQuietBuffer appState toplevelStderr  -- Failure: show buffered output
 
+    -- Wait for output stream handlers to finish before logging status messages,
+    -- to ensure all subprocess output is flushed first.
+    timeoutStream appState "stdout" $ wait stdoutHandler
+
+    -- We duplicate `subprocessStderr` before actually passing it to a
+    -- subprocess, so the original handle doesn't get closed by
+    -- `createProcess`. We must close it manually.
+    hClose appState.subprocessStderr
+    timeoutStream appState "stderr" $ wait stderrHandler
+    timeoutStream appState "stderr" $ wait subprocessStderrHandler
+
     logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
     logDebugParent m_parentRequestPipe $ "Subtask " <> toText jobName <> " finished with " <> show exitCode
 
@@ -218,15 +229,6 @@ main = do
             when snapshotArgs.fuzzyCache do
               branch <- getCurrentBranch appState
               RemoteCache.setLatestBuildHash appState s (toText appState.jobName) branch h.hash
-
-    timeoutStream appState "stdout" $ wait stdoutHandler
-
-    -- We duplicate `subprocessStderr` before actually passing it to a
-    -- subprocess, so the original handle doesn't get closed by
-    -- `createProcess`. We must close it manually.
-    hClose appState.subprocessStderr
-    timeoutStream appState "stderr" $ wait stderrHandler
-    timeoutStream appState "stderr" $ wait subprocessStderrHandler
 
     cancel cmdHandler
 

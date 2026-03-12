@@ -20,7 +20,7 @@ import qualified Data.Text as Text
 import qualified Data.ByteString.Lazy as BL
 import System.FileLock (withFileLock, SharedExclusive(..))
 import System.Directory (doesFileExist)
-import Utils (getCurrentCommit, logError, logDebug)
+import Utils (getCurrentCommit, logError, logDebug, logWarn)
 import Types (AppState(..), GithubClient(..), Settings(..))
 
 -- Define the data types for the status update
@@ -118,6 +118,33 @@ loadOrRefreshClient appState = do
   writeIORef appState.githubClient (Just client)
   pure client
 
+-- Force-refresh the token, ignoring both in-memory and file caches
+forceRefreshClient :: AppState -> IO GithubClient
+forceRefreshClient appState = do
+  let cacheFile = credentialsCacheFile appState.settings
+  let lockFile = cacheFile <> ".lock"
+
+  writeIORef appState.githubClient Nothing
+
+  client <- withFileLock lockFile Exclusive \_ ->
+    refreshToken appState cacheFile
+
+  writeIORef appState.githubClient (Just client)
+  pure client
+
+-- Execute a GitHub API request, retrying once with a fresh token on 401
+withFreshClient :: AppState -> (GithubClient -> IO (HTTP.Response BL.ByteString)) -> IO (HTTP.Response BL.ByteString)
+withFreshClient appState doRequest = do
+  client <- getClient appState
+  response <- doRequest client
+  if response.responseStatus.statusCode == 401
+    then do
+      logWarn appState "GitHub API returned 401, force-refreshing token and retrying..."
+      freshClient <- forceRefreshClient appState
+      doRequest freshClient
+    else
+      pure response
+
 -- Create new token and write to cache (caller should hold EXCLUSIVE lock)
 refreshToken :: AppState -> FilePath -> IO GithubClient
 refreshToken appState cacheFile = do
@@ -209,23 +236,23 @@ createTokenFromGitHub appState = do
 
 updateCommitStatus :: MonadIO m => AppState -> StatusRequest -> m ()
 updateCommitStatus appState statusRequest = liftIO do
-  client <- getClient appState
   sha <- getCurrentCommit appState
 
-  -- Prepare the status update request
-  let statusUrl = toString client.apiUrl <> "/repos/" ++ toString client.owner ++ "/" ++ toString client.repo ++ "/statuses/" ++ toString sha
-  initStatusRequest <- HTTP.parseRequest statusUrl
-  let statusReq = initStatusRequest
-                  { HTTP.method = "POST"
-                  , HTTP.requestHeaders =
-                      [ ("Authorization", "Bearer " <> TE.encodeUtf8 client.accessToken)
-                      , ("Accept", "application/vnd.github.v3+json")
-                      , ("Content-Type", "application/json")
-                      , ("User-Agent", "restaumatic-bot")
-                      ]
-                  , HTTP.requestBody = HTTP.RequestBodyLBS $ encode statusRequest
-                  }
-  statusResponse <- HTTP.httpLbs statusReq client.manager
+  statusResponse <- withFreshClient appState \client -> do
+    let statusUrl = toString client.apiUrl <> "/repos/" ++ toString client.owner ++ "/" ++ toString client.repo ++ "/statuses/" ++ toString sha
+    initStatusRequest <- HTTP.parseRequest statusUrl
+    let statusReq = initStatusRequest
+                    { HTTP.method = "POST"
+                    , HTTP.requestHeaders =
+                        [ ("Authorization", "Bearer " <> TE.encodeUtf8 client.accessToken)
+                        , ("Accept", "application/vnd.github.v3+json")
+                        , ("Content-Type", "application/json")
+                        , ("User-Agent", "restaumatic-bot")
+                        ]
+                    , HTTP.requestBody = HTTP.RequestBodyLBS $ encode statusRequest
+                    }
+    HTTP.httpLbs statusReq client.manager
+
   if statusResponse.responseStatus.statusCode == 201
     then
       logDebug appState "Commit status updated successfully"
@@ -237,21 +264,21 @@ updateCommitStatus appState statusRequest = liftIO do
 -- Check if a status exists for the current commit and context
 checkExistingStatus :: MonadIO m => AppState -> T.Text -> m Bool
 checkExistingStatus appState contextName = liftIO do
-  client <- getClient appState
   sha <- getCurrentCommit appState
 
-  -- Prepare the GET request for statuses
-  let statusUrl = toString client.apiUrl <> "/repos/" ++ toString client.owner ++ "/" ++ toString client.repo ++ "/commits/" ++ toString sha ++ "/statuses"
-  initStatusRequest <- HTTP.parseRequest statusUrl
-  let statusReq = initStatusRequest
-                  { HTTP.method = "GET"
-                  , HTTP.requestHeaders =
-                      [ ("Authorization", "Bearer " <> TE.encodeUtf8 client.accessToken)
-                      , ("Accept", "application/vnd.github.v3+json")
-                      , ("User-Agent", "restaumatic-bot")
-                      ]
-                  }
-  statusResponse <- HTTP.httpLbs statusReq client.manager
+  statusResponse <- withFreshClient appState \client -> do
+    let statusUrl = toString client.apiUrl <> "/repos/" ++ toString client.owner ++ "/" ++ toString client.repo ++ "/commits/" ++ toString sha ++ "/statuses"
+    initStatusRequest <- HTTP.parseRequest statusUrl
+    let statusReq = initStatusRequest
+                    { HTTP.method = "GET"
+                    , HTTP.requestHeaders =
+                        [ ("Authorization", "Bearer " <> TE.encodeUtf8 client.accessToken)
+                        , ("Accept", "application/vnd.github.v3+json")
+                        , ("User-Agent", "restaumatic-bot")
+                        ]
+                    }
+    HTTP.httpLbs statusReq client.manager
+
   if statusResponse.responseStatus.statusCode == 200
     then do
       let mStatuses = eitherDecode @[StatusResponse] (HTTP.responseBody statusResponse)

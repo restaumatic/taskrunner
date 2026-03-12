@@ -1,0 +1,9 @@
+# no toplevel
+# check output
+
+tmpfile=$(mktemp)
+taskrunner -n outer bash -e -c '
+  taskrunner -n inner echo hello
+' >$tmpfile 2>&1
+cat $tmpfile
+rm $tmpfile

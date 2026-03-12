@@ -1,0 +1,7 @@
+# no toplevel
+# check output
+
+tmpfile=$(mktemp)
+taskrunner -n test echo hello >$tmpfile 2>&1
+cat $tmpfile
+rm $tmpfile

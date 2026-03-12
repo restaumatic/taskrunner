@@ -20,6 +20,7 @@ import Control.Exception.Base (handle, throwIO)
 import System.IO.Error (isEOFError, IOError)
 import System.Posix.ByteString (stdOutput, fdToHandle, handleToFd)
 import System.Posix (Fd, dup, stdError)
+import System.Posix.Files (getFdStatus, deviceID, fileID)
 import CliArgs
 import System.FileLock (withFileLock, SharedExclusive (Exclusive))
 import Data.FileEmbed (embedStringFile)
@@ -121,8 +122,7 @@ main = do
 
     devnull <- openBinaryFile "/dev/null" ReadMode
 
-    toplevelStdout <- toplevelStream "_taskrunner_toplevel_stdout" stdOutput
-    toplevelStderr <- toplevelStream "_taskrunner_toplevel_stderr" stdError
+    (toplevelStdout, toplevelStderr) <- toplevelStreams
 
     (requestPipeRead, requestPipeWrite) <- createPipe
     requestPipeWriteFd <- handleToFd requestPipeWrite
@@ -337,10 +337,11 @@ runPostUnpackCmd appState cmd = do
 archiveName :: AppState -> SnapshotCliArgs -> Text -> Text
 archiveName appState snapshotArgs hash = toText appState.jobName <> maybe "" ("-"<>) snapshotArgs.cacheVersion <> "-" <> hash <> ".tar.zst"
 
-toplevelStream :: String -> Fd -> IO Handle
-toplevelStream envName fd = do
+-- | Acquire the FD for a toplevel stream, either by duping or reading from env.
+toplevelStreamFd :: String -> Fd -> IO Fd
+toplevelStreamFd envName fd = do
   envValue <- lookupEnv envName
-  newFd <- case envValue of
+  case envValue of
     Nothing -> do
       -- We are the top level.
       newFd <- dup fd
@@ -352,9 +353,32 @@ toplevelStream envName fd = do
           pure x
         Nothing ->
           bail $ "Invalid file descriptor " <> show value <> " in " <> envName
-  h <- fdToHandle newFd
-  hSetBuffering h LineBuffering
-  pure h
+
+-- | Create handles for toplevel stdout and stderr.
+-- When both FDs point to the same file, we create only one Handle and reuse it.
+-- GHC's fdToHandle applies file-level locking on regular files, so calling it
+-- twice on FDs pointing to the same file causes "resource busy (file is locked)".
+toplevelStreams :: IO (Handle, Handle)
+toplevelStreams = do
+  stdoutFd <- toplevelStreamFd "_taskrunner_toplevel_stdout" stdOutput
+  stderrFd <- toplevelStreamFd "_taskrunner_toplevel_stderr" stdError
+  stdoutStat <- getFdStatus stdoutFd
+  stderrStat <- getFdStatus stderrFd
+  if deviceID stdoutStat == deviceID stderrStat && fileID stdoutStat == fileID stderrStat
+    then do
+      -- Same underlying file: only call fdToHandle once to avoid GHC's
+      -- file-level locking conflict ("resource busy"). Leave stderrFd open
+      -- (not converted to a Handle) so child processes can still inherit it
+      -- via the _taskrunner_toplevel_stderr env var.
+      h <- fdToHandle stdoutFd
+      hSetBuffering h LineBuffering
+      pure (h, h)
+    else do
+      hOut <- fdToHandle stdoutFd
+      hSetBuffering hOut LineBuffering
+      hErr <- fdToHandle stderrFd
+      hSetBuffering hErr LineBuffering
+      pure (hOut, hErr)
 
 timeoutStream :: AppState -> Text -> IO () -> IO ()
 timeoutStream appState streamName action = do

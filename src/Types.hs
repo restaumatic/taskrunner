@@ -50,7 +50,6 @@ data AppState = AppState
   , snapshotArgsRef :: IORef (Maybe SnapshotCliArgs)
   , skipped :: IORef Bool
   , toplevelStderr :: Handle
-  , subprocessStderr :: Handle
   , logOutput :: Handle
   , quietBuffer :: IORef [ByteString]
 

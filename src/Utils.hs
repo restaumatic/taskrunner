@@ -5,15 +5,18 @@ import Universum
 import qualified Data.ByteString.Char8 as B8
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import Types
-import Control.Exception (throwIO)
+import Control.Exception (throwIO, handle)
+import System.IO.Error (isEOFError, IOError)
 import Text.Printf (printf)
 import Prelude (until)
 import Data.List ((!!))
-import System.Process (CreateProcess(..), StdStream (..), readCreateProcess)
+import System.Process (CreateProcess(..), StdStream (..), readCreateProcess, createPipe)
 import Data.Conduit.Process (proc)
 import qualified Data.Text as Text
-import GHC.IO.Handle (hDuplicate, hIsClosed)
+import GHC.IO.Handle (hIsClosed)
 import System.FilePath ((</>))
+import Control.Concurrent.Async (async, wait)
+import System.Timeout (timeout)
 
 outputLine :: AppState -> Handle -> ByteString -> ByteString -> IO ()
 outputLine appState toplevelOutput streamName line = do
@@ -87,10 +90,21 @@ bytesfmt formatter bs = printf (formatter <> " %s")
   bytesSuffixes = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
   bytesSuffix = bytesSuffixes !! i
 
+-- | Create a per-subprocess stderr pipe that prefixes output with the job name.
+-- The pipe is fully drained before returning.
+withStderrPipe :: AppState -> (Handle -> IO a) -> IO a
+withStderrPipe appState action = do
+  (readEnd, writeEnd) <- createPipe
+  handler <- async $ outputStreamHandler appState appState.toplevelStderr "stderr" readEnd
+  result <- action writeEnd `finally` do
+    hClose writeEnd
+    timeoutStream appState "stderr" $ wait handler
+  pure result
+
 isDirtyAtPaths :: AppState -> [FilePath] -> IO Bool
 isDirtyAtPaths _ [] = pure False
 isDirtyAtPaths appState paths =
-  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ -> do
+  withStderrPipe appState \stderr_ -> do
     output <-
       readCreateProcess
         (proc "git" (["status", "--porcelain", "--untracked-files=no", "--"] ++ paths))
@@ -101,7 +115,7 @@ isDirtyAtPaths appState paths =
 
 getCurrentBranch :: AppState -> IO Text
 getCurrentBranch appState =
-  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
+  withStderrPipe appState \stderr_ ->
     Text.strip . Text.pack <$> readCreateProcess
       (proc "git" ["symbolic-ref", "--short", "HEAD"]) { std_err = UseHandle stderr_ }
        ""
@@ -112,18 +126,16 @@ getMainBranchCommit appState =
     Nothing ->
       pure Nothing
     Just branch ->
-      bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
+      withStderrPipe appState \stderr_ ->
         Just . Text.strip . Text.pack <$> readCreateProcess
           (proc "git" ["merge-base", "HEAD", "origin/" <> toString branch]) { std_err = UseHandle stderr_ }
            ""
 
 getCurrentCommit :: AppState -> IO Text
-getCurrentCommit _appState =
-  -- TODO: fix: we can't use subprocessStderr here because it's used after closing output collector
-  -- Using normal stderr for now
---  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
+getCurrentCommit appState =
+  withStderrPipe appState \stderr_ ->
     Text.strip . Text.pack <$> readCreateProcess
-      (proc "git" ["rev-parse", "HEAD"])
+      (proc "git" ["rev-parse", "HEAD"]) { std_err = UseHandle stderr_ }
        ""
 
 logFileName :: Settings -> BuildId -> JobName -> FilePath
@@ -141,3 +153,21 @@ flushQuietBuffer appState toplevelOutput = do
 -- | Discard buffered output (used when task succeeds in quiet mode)
 discardQuietBuffer :: AppState -> IO ()
 discardQuietBuffer appState = writeIORef appState.quietBuffer []
+
+outputStreamHandler :: AppState -> Handle -> ByteString -> Handle -> IO ()
+outputStreamHandler appState toplevelOutput streamName stream = do
+  handle ignoreEOF $ forever do
+    line <- B8.hGetLine stream
+    outputLine appState toplevelOutput streamName line
+
+timeoutStream :: AppState -> Text -> IO () -> IO ()
+timeoutStream appState streamName action = do
+  result <- timeout (appState.settings.outputStreamTimeout * 1000000) action
+  when (isNothing result) do
+    logWarn appState $ "taskrunner: Task did not close " <> streamName <> " " <> show appState.settings.outputStreamTimeout <> " seconds after exiting."
+    logWarn appState "Perhaps the file descriptor was leaked to a background process?"
+    logWarn appState "Build will continue despite this error, but some output may be lost."
+
+ignoreEOF :: IOError -> IO ()
+ignoreEOF e | isEOFError e = pure ()
+            | otherwise    = throwIO e

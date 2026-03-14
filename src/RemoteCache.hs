@@ -26,7 +26,7 @@ import Network.URI (parseURI, URI (..), URIAuth(..))
 import System.Directory (makeAbsolute, canonicalizePath)
 import System.FilePath (makeRelative)
 import qualified System.FilePath as FP
-import Utils (bail, logDebug, logFileName, logInfo)
+import Utils (bail, logDebug, logFileName, logInfo, withStderrPipe)
 import qualified Amazonka as AWS
 import Control.Exception.Lens (handling)
 import System.Exit (ExitCode(..))
@@ -37,15 +37,15 @@ import qualified Data.Text.Lazy.Builder as TLB
 import Amazonka.S3.PutObject (newPutObject, PutObject(..))
 
 
-packTar :: MonadResource m => AppState -> FilePath -> [FilePath] -> ConduitT () BS.ByteString m ()
-packTar appState workdir files = do
+packTar :: MonadResource m => AppState -> Handle -> FilePath -> [FilePath] -> ConduitT () BS.ByteString m ()
+packTar appState stderrHandle workdir files = do
   let cmd = "tar"
   let args = if null files then ["-c", "--files-from=/dev/null"] else ["-c"] <> files
   liftIO $ logDebug appState $ "Running subprocess: " <> show (cmd:args) <> " in cwd " <> show workdir
   bracketP ( createProcess_ "createProcess_"
     (proc cmd args)
       { std_out = CreatePipe
-      , std_err = UseHandle appState.subprocessStderr
+      , std_err = UseHandle stderrHandle
       , cwd = Just workdir
       }
      ) cleanupProcess \case
@@ -57,15 +57,15 @@ packTar appState workdir files = do
        _ ->
          error "unable to obtain stdout pipe"
 
-unpackTar :: MonadResource m => AppState -> FilePath -> ConduitT BS.ByteString Void m ()
-unpackTar appState workdir = do
+unpackTar :: MonadResource m => AppState -> Handle -> FilePath -> ConduitT BS.ByteString Void m ()
+unpackTar appState stderrHandle workdir = do
   let cmd = "tar"
   let args = ["-x", "--zstd"]
   liftIO $ logDebug appState $ "Running subprocess: " <> show (cmd:args) <> " in cwd " <> show workdir
   bracketP ( createProcess_ "createProcess_"
     (proc cmd args)
       { std_in = CreatePipe
-      , std_err = UseHandle appState.subprocessStderr
+      , std_err = UseHandle stderrHandle
       , cwd = Just workdir
       }
      ) cleanupProcess \case
@@ -145,11 +145,12 @@ saveCache appState settings relativeCacheRoot files archiveName = do
 
     logDebug appState $ "Uploading to s3://" <> bucket <> "/" <> objectKey
 
-    runConduitRes do
+    withStderrPipe appState \stderrHandle ->
+      runConduitRes do
         let multipartUpload = (newCreateMultipartUpload (BucketName bucket) (ObjectKey objectKey) :: CreateMultipartUpload)
               { storageClass = Just StorageClass_REDUCED_REDUNDANCY }
         result <-
-          packTar appState cacheRoot filesRelativeToCacheRoot
+          packTar appState stderrHandle cacheRoot filesRelativeToCacheRoot
           .| Zstd.compress 3
           .| streamUpload env Nothing multipartUpload
         case result of
@@ -180,13 +181,14 @@ restoreCache appState settings cacheRoot archiveName logMode = do
       logDebug appState $ "Remote cache archive not found s3://" <> bucket <> "/" <> objectKey
       pure False
 
-  handling _NoSuchKey onNoSuchKey $ runConduitRes do
-    response <- AWS.send env $ newGetObject (BucketName bucket) (ObjectKey objectKey)
-    when (logMode == Log) do
-      liftIO $ logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
-    response.body.body
-          .| unpackTar appState cacheRoot
-    pure True
+  handling _NoSuchKey onNoSuchKey $ withStderrPipe appState \stderrHandle ->
+    runConduitRes do
+      response <- AWS.send env $ newGetObject (BucketName bucket) (ObjectKey objectKey)
+      when (logMode == Log) do
+        liftIO $ logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
+      response.body.body
+            .| unpackTar appState stderrHandle cacheRoot
+      pure True
 
 getLatestBuildHash
   :: AppState

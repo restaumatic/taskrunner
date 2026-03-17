@@ -1,0 +1,14 @@
+# no toplevel
+
+echo "input data" > input.txt
+git init -q
+git add input.txt
+git commit -qm "initial"
+
+taskrunner -n mytask bash -e -c '
+  snapshot input.txt --outputs --cmd "
+    echo post-unpack-stdout
+    echo post-unpack-stderr >&2
+  "
+  echo "Main task output"
+'

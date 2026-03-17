@@ -8,7 +8,7 @@ module App where
 import Universum hiding (force)
 
 import System.Environment (setEnv, lookupEnv, getEnvironment)
-import System.Process (CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe,  readCreateProcess, withCreateProcess)
+import System.Process (CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe, readCreateProcess, withCreateProcess)
 import System.IO
     ( openBinaryFile, hSetBuffering, BufferMode(..), hFlush )
 import qualified System.FilePath as FilePath
@@ -16,8 +16,7 @@ import System.FilePath ((</>))
 import System.Directory ( createDirectoryIfMissing, doesFileExist, getCurrentDirectory, createDirectory )
 import qualified Data.ByteString.Char8 as B8
 import Control.Concurrent.Async (async, wait, cancel)
-import Control.Exception.Base (handle, throwIO)
-import System.IO.Error (isEOFError, IOError)
+import Control.Exception.Base (handle)
 import System.Posix.ByteString (stdOutput, fdToHandle, handleToFd)
 import System.Posix (Fd, dup, stdError)
 import System.Posix.Files (getFdStatus, deviceID, fileID)
@@ -33,8 +32,6 @@ import qualified Data.Text.IO as Text
 import GHC.IO.Exception (ExitCode(..))
 import Crypto.Hash qualified as H
 import Data.Containers.ListUtils (nubOrdOn)
-import GHC.IO.Handle (hDuplicate)
-import System.Timeout (timeout)
 import Prelude (read)
 import Types
 import Utils
@@ -133,7 +130,7 @@ main = do
     -- Recursive: AppState is used before process is started (mostly for logging)
     rec
 
-      appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure subprocessStderr <*> pure logFile <*> newIORef []
+      appState <- AppState settings jobName buildId isToplevel <$> newIORef Nothing <*> newIORef Nothing <*> newIORef False <*> pure toplevelStderr <*> pure logFile <*> newIORef []
         <*> newIORef Nothing
 
       when (isToplevel && appState.settings.enableCommitStatus) do
@@ -158,8 +155,6 @@ main = do
             ] <> parentEnv
           }
 
-      (subprocessStderrRead, subprocessStderr) <- createPipe
-
     logDebug appState $ "Running command: " <> show (args.cmd : args.args)
     logDebug appState $ "  buildId: " <> show buildId
     logDebug appState $ "  cwd: " <> show cwd
@@ -169,7 +164,6 @@ main = do
 
     stdoutHandler <- async $ outputStreamHandler appState toplevelStdout "stdout" stdoutPipe
     stderrHandler <- async $ outputStreamHandler appState toplevelStderr "stderr" stderrPipe
-    subprocessStderrHandler <- async $ outputStreamHandler appState toplevelStderr "stderr" subprocessStderrRead
 
     exitCode <- waitForProcess processHandle
 
@@ -180,6 +174,11 @@ main = do
       if exitCode == ExitSuccess
         then discardQuietBuffer appState  -- Success: discard buffered output
         else flushQuietBuffer appState toplevelStderr  -- Failure: show buffered output
+
+    -- Wait for output stream handlers to finish before logging status messages,
+    -- to ensure all subprocess output is flushed first.
+    timeoutStream appState "stdout" $ wait stdoutHandler
+    timeoutStream appState "stderr" $ wait stderrHandler
 
     logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
     logDebugParent m_parentRequestPipe $ "Subtask " <> toText jobName <> " finished with " <> show exitCode
@@ -218,15 +217,6 @@ main = do
             when snapshotArgs.fuzzyCache do
               branch <- getCurrentBranch appState
               RemoteCache.setLatestBuildHash appState s (toText appState.jobName) branch h.hash
-
-    timeoutStream appState "stdout" $ wait stdoutHandler
-
-    -- We duplicate `subprocessStderr` before actually passing it to a
-    -- subprocess, so the original handle doesn't get closed by
-    -- `createProcess`. We must close it manually.
-    hClose appState.subprocessStderr
-    timeoutStream appState "stderr" $ wait stderrHandler
-    timeoutStream appState "stderr" $ wait subprocessStderrHandler
 
     cancel cmdHandler
 
@@ -323,7 +313,7 @@ newBuildId = toText . iso8601Show <$> getCurrentTime
 runPostUnpackCmd :: AppState -> String -> IO ()
 runPostUnpackCmd appState cmd = do
   logDebug appState $ "Running post-unpack cmd " <> show cmd
-  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
+  withStderrPipe appState \stderr_ ->
     withCreateProcess (
       (Process.shell cmd)
         { std_out = UseHandle stderr_ -- TODO: really, we should have subprocesStdout also
@@ -379,26 +369,6 @@ toplevelStreams = do
       hErr <- fdToHandle stderrFd
       hSetBuffering hErr LineBuffering
       pure (hOut, hErr)
-
-timeoutStream :: AppState -> Text -> IO () -> IO ()
-timeoutStream appState streamName action = do
-  result <- timeout (appState.settings.outputStreamTimeout * 1000000) action
-  when (isNothing result) do
-    logWarn appState $ "taskrunner: Task did not close " <> streamName <> " " <> show appState.settings.outputStreamTimeout <> " seconds after exiting."
-    logWarn appState "Perhaps the file descriptor was leaked to a background process?"
-    logWarn appState "Build will continue despite this error, but some output may be lost."
-
-    -- Note: this used to be a fatal error (exited with non-zero status),
-    -- but builds failed too often due to this, and we don't want to be forced to debug it every time,
-    -- or to retry the build.
-    --
-    -- Later we might want to add some monitoring so that we can see if this happens often.
-
-outputStreamHandler :: AppState -> Handle -> ByteString -> Handle -> IO ()
-outputStreamHandler appState toplevelOutput streamName stream = do
-  handle ignoreEOF $ forever do
-    line <- B8.hGetLine stream
-    outputLine appState toplevelOutput streamName line
 
 commandHandler :: AppState -> Handle -> Handle -> IO ()
 commandHandler appState requestPipe responsePipe =
@@ -583,15 +553,11 @@ hashFilename appState = appState.settings.stateDirectory </> "hash" </> (appStat
 
 hashFileInputs :: AppState -> [FilePath] -> IO Text
 hashFileInputs appState inputs =
-  bracket (hDuplicate appState.subprocessStderr) hClose \stderr_ ->
+  withStderrPipe appState \stderr_ ->
     Text.strip . Text.pack <$> readCreateProcess
       (proc "bash" (["-c", $(embedStringFile "src/hash-files.sh"), "hash-files"] <> inputs))
         { std_err = UseHandle stderr_ }
        ""
-
-ignoreEOF :: IOError -> IO ()
-ignoreEOF e | isEOFError e = pure ()
-            | otherwise    = throwIO e
 
 hexSha1 :: Text -> Text
 hexSha1 str = show (H.hash (encodeUtf8 str :: ByteString) :: H.Digest H.SHA1)

@@ -1,0 +1,6 @@
+-- output:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Main task output
+[mytask] info | success
+[mytask] stderr | post-unpack-stdout
+[mytask] stderr | post-unpack-stderr

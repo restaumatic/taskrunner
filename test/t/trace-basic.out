@@ -1,0 +1,9 @@
+-- output:
+
+=== File System Trace Report ===
+
+Files read:
+  input.txt
+
+Files written:
+  output.txt

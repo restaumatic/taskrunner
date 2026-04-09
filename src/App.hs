@@ -10,10 +10,10 @@ import Universum hiding (force)
 import System.Environment (setEnv, lookupEnv, getEnvironment)
 import System.Process (CreateProcess (..), StdStream (CreatePipe, UseHandle), proc, waitForProcess, createPipe, readCreateProcess, withCreateProcess)
 import System.IO
-    ( openBinaryFile, hSetBuffering, BufferMode(..), hFlush )
+    ( openBinaryFile, hSetBuffering, BufferMode(..), hFlush, openTempFile )
 import qualified System.FilePath as FilePath
 import System.FilePath ((</>))
-import System.Directory ( createDirectoryIfMissing, doesFileExist, getCurrentDirectory, createDirectory )
+import System.Directory ( createDirectoryIfMissing, doesFileExist, getCurrentDirectory, createDirectory, removeFile )
 import qualified Data.ByteString.Char8 as B8
 import Control.Concurrent.Async (async, wait, cancel)
 import Control.Exception.Base (handle)
@@ -44,6 +44,7 @@ import Control.Monad.EarlyReturn (withEarlyReturn, earlyReturn)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import Data.Time.Clock (getCurrentTime)
 import qualified Data.ByteString.Lazy.Char8 as BL8
+import qualified Trace
 
 getSettings :: IO Settings
 getSettings = do
@@ -62,6 +63,7 @@ getSettings = do
   mainBranch <- map toText <$> lookupEnv "TASKRUNNER_MAIN_BRANCH"
   quietMode <- (==Just "1") <$> lookupEnv "TASKRUNNER_QUIET"
   githubTokenRefreshThresholdSeconds <- maybe 300 read <$> lookupEnv "TASKRUNNER_GITHUB_TOKEN_REFRESH_THRESHOLD_SECONDS"
+  traceMode <- (==Just "1") <$> lookupEnv "_taskrunner_trace"
   pure Settings
         { stateDirectory
         , rootDirectory
@@ -78,6 +80,7 @@ getSettings = do
         , force = False
         , quietMode
         , githubTokenRefreshThresholdSeconds
+        , trace = traceMode
         }
 
 main :: IO ()
@@ -85,7 +88,10 @@ main = do
   (args :: CliArgs) <- getCliArgs
   settings' <- getSettings
   let f = args.force
-  let settings = (settings' :: Settings) { force = f }
+  let traceMode = args.trace || settings'.trace
+  let settings = (settings' :: Settings) { force = f, trace = traceMode }
+
+  when traceMode Trace.checkFsatrace
 
   let jobName = fromMaybe (FilePath.takeFileName args.cmd) args.name
 
@@ -127,6 +133,17 @@ main = do
     responsePipeReadFd <- handleToFd responsePipeRead
     hSetBuffering responsePipeWrite LineBuffering
 
+    m_traceFile <- if settings.trace then do
+      (fp, h) <- openTempFile settings.stateDirectory "trace.log"
+      hClose h
+      pure (Just fp)
+    else
+      pure Nothing
+
+    let (actualCmd, actualArgs) = case m_traceFile of
+          Just traceFile -> Trace.wrapWithFsatrace traceFile args.cmd args.args
+          Nothing -> (args.cmd, args.args)
+
     -- Recursive: AppState is used before process is started (mostly for logging)
     rec
 
@@ -146,13 +163,15 @@ main = do
       -- TODO: should we use delegate_ctlc or DIY? See https://hackage.haskell.org/package/process-1.6.20.0/docs/System-Process.html#g:4
       -- -> We should DIY because we need to flush stream etc.
       (Nothing, Just stdoutPipe, Just stderrPipe, processHandle) <- Process.createProcess
-        (proc args.cmd args.args) { std_in = UseHandle devnull, std_out = CreatePipe
+        (proc actualCmd actualArgs) { std_in = UseHandle devnull, std_out = CreatePipe
         , std_err = CreatePipe
         , env=Just $ nubOrdOn fst $
             [ ("BASH_FUNC_snapshot%%", "() {\n" <> $(embedStringFile "src/snapshot.sh") <> "\n}")
             , ("_taskrunner_request_pipe", show requestPipeWriteFd)
             , ("_taskrunner_response_pipe", show responsePipeReadFd)
-            ] <> parentEnv
+            ]
+            <> (if settings.trace then [("_taskrunner_trace", "1")] else [])
+            <> parentEnv
           }
 
     logDebug appState $ "Running command: " <> show (args.cmd : args.args)
@@ -182,6 +201,18 @@ main = do
 
     logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
     logDebugParent m_parentRequestPipe $ "Subtask " <> toText jobName <> " finished with " <> show exitCode
+
+    whenJust m_traceFile \traceFile -> do
+      traceExists <- doesFileExist traceFile
+      if traceExists then do
+        traceContent <- Text.readFile traceFile
+        let entries = Trace.parseTraceOutput traceContent
+        let filtered = Trace.filterTraceEntries settings.rootDirectory entries
+        let report = Trace.formatTraceReport settings.rootDirectory filtered
+        Text.hPutStr toplevelStderr report
+        removeFile traceFile
+      else
+        logWarn appState "Trace file not found after execution; fsatrace may have failed to start."
 
     m_hashToSave <- readIORef appState.hashToSaveRef
 

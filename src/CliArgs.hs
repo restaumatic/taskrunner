@@ -6,6 +6,7 @@ import Options.Applicative
 data CliArgs = CliArgs
     { name :: Maybe String  -- Optional name argument
     , force :: Bool -- Skip cache
+    , trace :: Bool -- Trace file system access (requires fsatrace)
     , cmd  :: String        -- The command to run
     , args :: [String]      -- List of arguments for the command
     } deriving (Show)
@@ -21,6 +22,9 @@ commandParser = CliArgs
         ( long "force"
        <> short 'f'
        <> help "Skip cache and fuzzy cache" )
+    <*> switch
+        ( long "trace"
+       <> help "Trace file system access during task execution (requires fsatrace)" )
     <*> argument str
         ( metavar "CMD"
        <> help "The command to run" )

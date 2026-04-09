@@ -62,12 +62,16 @@ filterTraceEntries rootDir entries =
     -- Don't exclude system prefixes that are ancestors of the root directory
     systemPrefixes = filter (\sp -> not (sp `isPrefixOf` rootDir)) allSystemPrefixes
 
+    -- Paths within the project that should be excluded (not meaningful inputs)
+    excludedRelPrefixes = [".git/"]
+
     isProjectFile entry =
       let p = entry.path
           rel = makeRelative rootDir p
        in rootDir `isPrefixOf` p
           && isRelative rel
           && not (any (`isPrefixOf` p) systemPrefixes)
+          && not (any (`isPrefixOf` rel) excludedRelPrefixes)
 
 formatTraceReport :: FilePath -> [TraceEntry] -> Text
 formatTraceReport rootDir entries =

@@ -81,6 +81,7 @@ getSettings = do
         , quietMode
         , githubTokenRefreshThresholdSeconds
         , trace = traceMode
+        , traceFiles = False
         }
 
 main :: IO ()
@@ -88,8 +89,8 @@ main = do
   (args :: CliArgs) <- getCliArgs
   settings' <- getSettings
   let f = args.force
-  let traceMode = args.trace || settings'.trace
-  let settings = (settings' :: Settings) { force = f, trace = traceMode }
+  let traceMode = args.trace || args.traceFiles || settings'.trace
+  let settings = (settings' :: Settings) { force = f, trace = traceMode, traceFiles = args.traceFiles }
 
   when traceMode Trace.checkFsatrace
 
@@ -208,8 +209,16 @@ main = do
         traceContent <- Text.readFile traceFile
         let entries = Trace.parseTraceOutput traceContent
         let filtered = Trace.filterTraceEntries settings.rootDirectory entries
-        let report = Trace.formatTraceReport settings.rootDirectory filtered
+        let format = if settings.traceFiles then Trace.formatFileReport else Trace.formatDirectoryReport
+        let report = format settings.rootDirectory filtered
         Text.hPutStr toplevelStderr report
+
+        m_snapshotArgs' <- readIORef appState.snapshotArgsRef
+        whenJust m_snapshotArgs' \snapshotArgs -> do
+          let discrepancies = Trace.findDiscrepancies settings.rootDirectory cwd snapshotArgs.fileInputs filtered
+          unless (null discrepancies) do
+            Text.hPutStr toplevelStderr (Trace.formatDiscrepancies discrepancies)
+
         removeFile traceFile
       else
         logWarn appState "Trace file not found after execution; fsatrace may have failed to start."

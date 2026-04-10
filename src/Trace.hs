@@ -5,14 +5,18 @@ module Trace
   , TraceEntry(..)
   , TraceOp(..)
   , filterTraceEntries
-  , formatTraceReport
+  , formatFileReport
+  , formatDirectoryReport
+  , findDiscrepancies
+  , formatDiscrepancies
   ) where
 
 import Universum
 
 import qualified Data.Text as Text
+import qualified Data.Map.Strict as Map
 import System.Directory (findExecutable)
-import System.FilePath (makeRelative, isRelative)
+import System.FilePath (makeRelative, isRelative, (</>))
 import Data.List (nub)
 import Utils (bail)
 
@@ -73,8 +77,9 @@ filterTraceEntries rootDir entries =
           && not (any (`isPrefixOf` p) systemPrefixes)
           && not (any (`isPrefixOf` rel) excludedRelPrefixes)
 
-formatTraceReport :: FilePath -> [TraceEntry] -> Text
-formatTraceReport rootDir entries =
+-- | Format trace report showing individual files (--trace-files)
+formatFileReport :: FilePath -> [TraceEntry] -> Text
+formatFileReport rootDir entries =
   let reads_  = nub $ sort [makeRelative rootDir e.path | e <- entries, e.op == TraceRead]
       writes = nub $ sort [makeRelative rootDir e.path | e <- entries, e.op == TraceWrite]
 
@@ -86,3 +91,80 @@ formatTraceReport rootDir entries =
       <> section "Files read:" reads_
       <> (if not (null reads_) && not (null writes) then "\n" else "")
       <> section "Files written:" writes
+
+-- | Format trace report showing directory-level summary (--trace, default)
+formatDirectoryReport :: FilePath -> [TraceEntry] -> Text
+formatDirectoryReport rootDir entries =
+  let reads_  = nub [makeRelative rootDir e.path | e <- entries, e.op == TraceRead]
+      writes = nub [makeRelative rootDir e.path | e <- entries, e.op == TraceWrite]
+
+      dirSummary :: [FilePath] -> [(FilePath, Int)]
+      dirSummary = sortOn fst . Map.toList . foldl' countDir Map.empty
+        where
+          countDir acc fp =
+            let dir = topLevelDir fp
+             in Map.insertWith (+) dir (1 :: Int) acc
+
+      topLevelDir :: FilePath -> FilePath
+      topLevelDir fp = case break (== '/') fp of
+        (_, '/':_) -> takeWhile (/= '/') fp <> "/"
+        _          -> fp  -- file at root level, show as-is
+
+      section :: Text -> [(FilePath, Int)] -> Text
+      section _     []    = ""
+      section title dirs = title <> "\n" <> Text.unlines
+        (map (\(d, n) -> "  " <> toText d <> " (" <> show n <> " files)") dirs)
+
+   in "\n=== File System Trace Report ===\n\n"
+      <> section "Directories read:" (dirSummary reads_)
+      <> (if not (null reads_) && not (null writes) then "\n" else "")
+      <> section "Directories written:" (dirSummary writes)
+
+-- | Resolve snapshot input pathspecs to directories relative to rootDirectory.
+-- Pathspecs: "." = cwd, ":/path" = from root, "relative" = relative to cwd
+resolveInputPaths :: FilePath -> FilePath -> [FilePath] -> [FilePath]
+resolveInputPaths rootDir cwd = map resolve
+  where
+    cwdRel = makeRelative rootDir cwd
+
+    resolve (':':'/':rest) = rest           -- ":/libs/ps" -> "libs/ps"
+    resolve "."            = cwdRel         -- "." -> cwd relative to root
+    resolve p
+      | "/" `isPrefixOf` p = makeRelative rootDir p  -- absolute path
+      | otherwise          = cwdRel </> p            -- relative to cwd
+
+-- | Check if a file path is covered by any of the resolved input directories.
+isCoveredBy :: FilePath -> [FilePath] -> Bool
+isCoveredBy file inputs = any covers inputs
+  where
+    covers "."    = True  -- "." means repo root, covers everything
+    covers input
+      | input == file = True
+      | otherwise     = (input <> "/") `isPrefixOf` file
+
+-- | Find files that were read but not covered by declared snapshot inputs.
+findDiscrepancies :: FilePath -> FilePath -> [FilePath] -> [TraceEntry] -> [FilePath]
+findDiscrepancies rootDir cwd snapshotInputs entries =
+  let resolvedInputs = resolveInputPaths rootDir cwd snapshotInputs
+      reads_ = nub $ sort [makeRelative rootDir e.path | e <- entries, e.op == TraceRead]
+      -- Exclude the scripts themselves and taskrunner internals
+      excludePrefixes = [".taskrunner/", "scripts/"]
+   in filter (\f -> not (isCoveredBy f resolvedInputs)
+                    && not (any (`isPrefixOf` f) excludePrefixes))
+             reads_
+
+-- | Format discrepancy warnings
+formatDiscrepancies :: [FilePath] -> Text
+formatDiscrepancies files =
+  let dirSummary = sortOn fst . Map.toList . foldl' countDir Map.empty $ files
+        where
+          countDir acc fp =
+            let dir = case break (== '/') fp of
+                        (_, '/':_) -> takeWhile (/= '/') fp <> "/"
+                        _          -> fp
+             in Map.insertWith (+) dir (1 :: Int) acc
+
+   in "\n=== Snapshot Discrepancies ===\n"
+      <> "Files read but NOT covered by snapshot inputs:\n"
+      <> Text.unlines (map (\(d, n) -> "  " <> toText d <> " (" <> show n <> " files)") dirSummary)
+      <> "\n" <> Text.unlines (map (\f -> "  " <> toText f) files)

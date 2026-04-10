@@ -23,6 +23,7 @@ data Settings = Settings
   , quietMode :: Bool
   , githubTokenRefreshThresholdSeconds :: Int
   , trace :: Bool
+  , traceFiles :: Bool
   } deriving (Show)
 
 type JobName = String

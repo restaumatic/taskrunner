@@ -2,8 +2,8 @@
 
 === File System Trace Report ===
 
-Files read:
-  input.txt
+Directories read:
+  input.txt (1 files)
 
-Files written:
-  output.txt
+Directories written:
+  output.txt (1 files)

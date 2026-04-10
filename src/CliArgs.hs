@@ -7,6 +7,7 @@ data CliArgs = CliArgs
     { name :: Maybe String  -- Optional name argument
     , force :: Bool -- Skip cache
     , trace :: Bool -- Trace file system access (requires fsatrace)
+    , traceFiles :: Bool -- Show individual files in trace (instead of directory summary)
     , cmd  :: String        -- The command to run
     , args :: [String]      -- List of arguments for the command
     } deriving (Show)
@@ -25,6 +26,9 @@ commandParser = CliArgs
     <*> switch
         ( long "trace"
        <> help "Trace file system access during task execution (requires fsatrace)" )
+    <*> switch
+        ( long "trace-files"
+       <> help "Like --trace but show individual files instead of directory summary" )
     <*> argument str
         ( metavar "CMD"
        <> help "The command to run" )

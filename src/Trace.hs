@@ -16,7 +16,7 @@ import Universum
 import qualified Data.Text as Text
 import qualified Data.Map.Strict as Map
 import System.Directory (findExecutable)
-import System.FilePath (makeRelative, isRelative, (</>))
+import System.FilePath (makeRelative, isRelative, (</>), takeFileName)
 import Data.List (nub)
 import Utils (bail)
 
@@ -67,7 +67,9 @@ filterTraceEntries rootDir entries =
     systemPrefixes = filter (\sp -> not (sp `isPrefixOf` rootDir)) allSystemPrefixes
 
     -- Paths within the project that should be excluded (not meaningful inputs)
-    excludedRelPrefixes = [".git/"]
+    excludedRelPrefixes = [".git/", ".taskrunner/"]
+    excludedExact = [".git", ".gitignore"]
+    excludedFileNames = [".gitignore"]
 
     isProjectFile entry =
       let p = entry.path
@@ -76,6 +78,8 @@ filterTraceEntries rootDir entries =
           && isRelative rel
           && not (any (`isPrefixOf` p) systemPrefixes)
           && not (any (`isPrefixOf` rel) excludedRelPrefixes)
+          && rel `notElem` excludedExact
+          && takeFileName rel `notElem` excludedFileNames
 
 -- | Format trace report showing individual files (--trace-files)
 formatFileReport :: FilePath -> [TraceEntry] -> Text

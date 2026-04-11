@@ -1,3 +1,9 @@
+-- | File system tracing via fsatrace.
+-- The approach of using fsatrace (LD_PRELOAD-based file system call interception)
+-- to automatically discover file dependencies is taken from Rattle
+-- (https://github.com/ndmitchell/rattle), a build system that uses it to
+-- automatically track which files are read/written by commands rather than
+-- requiring manual dependency declarations.
 module Trace
   ( checkFsatrace
   , wrapWithFsatrace

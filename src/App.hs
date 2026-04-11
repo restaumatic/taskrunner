@@ -63,7 +63,6 @@ getSettings = do
   mainBranch <- map toText <$> lookupEnv "TASKRUNNER_MAIN_BRANCH"
   quietMode <- (==Just "1") <$> lookupEnv "TASKRUNNER_QUIET"
   githubTokenRefreshThresholdSeconds <- maybe 300 read <$> lookupEnv "TASKRUNNER_GITHUB_TOKEN_REFRESH_THRESHOLD_SECONDS"
-  traceMode <- (==Just "1") <$> lookupEnv "_taskrunner_trace"
   pure Settings
         { stateDirectory
         , rootDirectory
@@ -80,7 +79,7 @@ getSettings = do
         , force = False
         , quietMode
         , githubTokenRefreshThresholdSeconds
-        , trace = traceMode
+        , trace = False
         , traceFiles = False
         }
 
@@ -89,10 +88,12 @@ main = do
   (args :: CliArgs) <- getCliArgs
   settings' <- getSettings
   let f = args.force
-  let traceMode = args.trace || args.traceFiles || settings'.trace
-  let settings = (settings' :: Settings) { force = f, trace = traceMode, traceFiles = args.traceFiles }
+  -- Only trace when explicitly requested via CLI, not when inherited via env.
+  -- The parent's fsatrace already traces the entire process tree via LD_PRELOAD.
+  let traceExplicit = args.trace || args.traceFiles
+  let settings = (settings' :: Settings) { force = f, trace = traceExplicit, traceFiles = args.traceFiles }
 
-  when traceMode Trace.checkFsatrace
+  when traceExplicit Trace.checkFsatrace
 
   let jobName = fromMaybe (FilePath.takeFileName args.cmd) args.name
 

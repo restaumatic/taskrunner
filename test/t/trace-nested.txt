@@ -1,0 +1,12 @@
+# check output
+# fsatrace
+# no toplevel
+echo "outer" > outer.txt
+echo "inner" > inner.txt
+git init -q
+git add outer.txt inner.txt
+git commit -q -m "init"
+taskrunner --trace -n outer bash -e -c '
+  cat outer.txt > outer-copy.txt
+  taskrunner -n inner bash -e -c "cat inner.txt > inner-copy.txt"
+'

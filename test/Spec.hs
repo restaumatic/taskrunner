@@ -12,6 +12,7 @@ import System.IO
 import System.IO.Temp (withSystemTempDirectory)
 import System.Exit (ExitCode(..))
 import System.Environment (getEnv, lookupEnv)
+import System.Directory (findExecutable)
 import System.FilePath.Glob as Glob
 import System.FilePath qualified as FP
 import Data.Default (Default(..))
@@ -40,19 +41,26 @@ goldenTests = do
   skipS3Explicit <- (==Just "1") <$> lookupEnv "SKIP_S3_TESTS"
   hasS3Creds <- hasS3Credentials
   let skipS3 = skipS3Explicit || not hasS3Creds
+  skipFsatraceExplicit <- (==Just "1") <$> lookupEnv "SKIP_FSATRACE_TESTS"
+  hasFsatrace <- isJust <$> findExecutable "fsatrace"
+  let skipFsatrace = skipFsatraceExplicit || not hasFsatrace
 
   inputFiles0 <- sort <$> findByExtension [".txt"] "test/t"
   inputFiles1 <- if skipS3
     then filterM (fmap not . hasS3Directive) inputFiles0
     else pure inputFiles0
+  inputFiles2 <- if skipFsatrace
+    then filterM (fmap not . hasFsatraceDirective) inputFiles1
+    else pure inputFiles1
   let inputFiles
-        | skipSlow = filter (\filename -> not ("/slow/" `isInfixOf` filename)) inputFiles1
-        | otherwise = inputFiles1
+        | skipSlow = filter (\filename -> not ("/slow/" `isInfixOf` filename)) inputFiles2
+        | otherwise = inputFiles2
 
   -- Print informative message about what tests are running
   let totalTests = length inputFiles0
       s3Tests = length inputFiles0 - length inputFiles1
-      slowTests = length inputFiles1 - length inputFiles
+      fsatraceTests = length inputFiles1 - length inputFiles2
+      slowTests = length inputFiles2 - length inputFiles
       runningTests = length inputFiles
 
   when (skipS3 && s3Tests > 0) $ do
@@ -60,6 +68,12 @@ goldenTests = do
       then System.IO.putStrLn $ "SKIP_S3_TESTS=1 - skipping " <> show s3Tests <> " S3-dependent tests"
       else System.IO.putStrLn $ "S3 credentials not found - skipping " <> show s3Tests <> " S3-dependent tests"
     System.IO.putStrLn $ "To run S3 tests, set: TASKRUNNER_TEST_S3_ENDPOINT, TASKRUNNER_TEST_S3_ACCESS_KEY, TASKRUNNER_TEST_S3_SECRET_KEY"
+
+  when (skipFsatrace && fsatraceTests > 0) $ do
+    if skipFsatraceExplicit
+      then System.IO.putStrLn $ "SKIP_FSATRACE_TESTS=1 - skipping " <> show fsatraceTests <> " fsatrace-dependent tests"
+      else System.IO.putStrLn $ "fsatrace not found - skipping " <> show fsatraceTests <> " fsatrace-dependent tests"
+    System.IO.putStrLn $ "To run fsatrace tests, install fsatrace from https://github.com/jacereda/fsatrace"
 
   when (skipSlow && slowTests > 0) $
     System.IO.putStrLn $ "SKIP_SLOW_TESTS=1 - skipping " <> show slowTests <> " slow tests"
@@ -174,6 +188,7 @@ data Options = Options
   { checkFileGlobs :: [Text]
   , toplevel :: Bool
   , s3 :: Bool
+  , fsatrace :: Bool
   -- | Whether to provide GitHub app credentials in environment.
   -- If github status is disabled, taskrunner should work without them.
   , githubKeys :: Bool
@@ -187,6 +202,7 @@ instance Default Options where
     { checkFileGlobs = ["output"]
     , toplevel = True
     , s3 = False
+    , fsatrace = False
     , githubKeys = False
     , quiet = False
     , githubTokenLifetime = Nothing
@@ -206,6 +222,9 @@ getOptions source = flip execState def $ go (lines source)
         go rest
       ["#", "s3"] -> do
         modify (\s -> s { s3 = True })
+        go rest
+      ["#", "fsatrace"] -> do
+        modify (\s -> s { fsatrace = True })
         go rest
       ["#", "github", "keys"] -> do
         modify (\s -> s { githubKeys = True })
@@ -269,6 +288,12 @@ hasS3Directive file = do
   content <- System.IO.readFile file
   let options = getOptions (toText content)
   pure options.s3
+
+hasFsatraceDirective :: FilePath -> IO Bool
+hasFsatraceDirective file = do
+  content <- System.IO.readFile file
+  let options = getOptions (toText content)
+  pure options.fsatrace
 
 hasS3Credentials :: IO Bool
 hasS3Credentials = do

@@ -1,0 +1,13 @@
+-- output:
+
+=== File System Trace Report ===
+
+Directories read:
+  inner.txt (1 files)
+  outer.txt (1 files)
+
+Directories written:
+  builds/ (2 files)
+  inner-copy.txt (1 files)
+  locks/ (1 files)
+  outer-copy.txt (1 files)

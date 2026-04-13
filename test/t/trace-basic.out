@@ -1,0 +1,9 @@
+-- output:
+
+=== File System Trace Report ===
+
+Directories read:
+  input.txt (1 files)
+
+Directories written:
+  output.txt (1 files)

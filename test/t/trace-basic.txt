@@ -1,0 +1,10 @@
+# check output
+# fsatrace
+# no toplevel
+echo "hello" > input.txt
+git init -q
+git add input.txt
+git commit -q -m "init"
+taskrunner --trace -n mytask bash -e -c '
+  cat input.txt > output.txt
+'

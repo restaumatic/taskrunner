@@ -1,0 +1,9 @@
+several chunks: ok in 3 request(s)
+exact multiple of chunk size: ok in 2 request(s)
+one byte over a chunk boundary: ok in 2 request(s)
+more chunks than concurrency: ok in 10 request(s)
+smaller than one chunk: ok in 1 request(s)
+concurrency 1 does not use ranges: ok in 1 request(s), range headers: [Nothing]
+server ignores Range: ok in 1 request(s)
+server hides the object size: ok in 2 request(s)
+a chunk fails: failed, as expected

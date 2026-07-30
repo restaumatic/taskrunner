@@ -3,10 +3,10 @@ module RemoteCache where
 
 import Universum
 
-import Control.Monad.Trans.Resource (MonadResource)
+import Control.Monad.Trans.Resource (MonadResource, ResourceT)
 import Amazonka.Env (newEnv, Env'(..), overrideService)
 import Amazonka.S3 (BucketName(..), ObjectKey(..), newGetObject, _NoSuchKey, StorageClass (StorageClass_REDUCED_REDUNDANCY))
-import Amazonka.S3.GetObject (GetObjectResponse(..))
+import Amazonka.S3.GetObject (GetObject(..), GetObjectResponse(..))
 import qualified Data.ByteString as BS
 import Data.Conduit ((.|), ConduitT, bracketP, runConduitRes)
 import qualified Data.Conduit.Zstd as Zstd
@@ -21,20 +21,22 @@ import System.Environment (lookupEnv)
 import Amazonka.Types ( Region(..), AccessKey(..), SecretKey(..), Service, s3AddressingStyle, S3AddressingStyle(..) )
 import Types
 import System.Process (CreateProcess(..), cleanupProcess, createProcess_, StdStream (..), proc, waitForProcess)
-import Conduit (sourceHandle, sinkHandle, foldMapC)
+import Conduit (sourceHandle, sinkHandle, foldMapC, sinkList)
 import Network.URI (parseURI, URI (..), URIAuth(..))
 import System.Directory (makeAbsolute, canonicalizePath)
 import System.FilePath (makeRelative)
 import qualified System.FilePath as FP
-import Utils (bail, logDebug, logFileName, logInfo, withStderrPipe)
+import Utils (bail, bytesfmt, logDebug, logFileName, logInfo, logWarn, timed, transferSummary, withStderrPipe)
 import qualified Amazonka as AWS
 import Control.Exception.Lens (handling)
 import System.Exit (ExitCode(..))
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Text as CT
+import qualified Data.Text as Text
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
 import Amazonka.S3.PutObject (newPutObject, PutObject(..))
+import Control.Concurrent.Prefetch (cancelPrefetch, nextPrefetch, startPrefetch)
 
 
 packTar :: MonadResource m => AppState -> Handle -> FilePath -> [FilePath] -> ConduitT () BS.ByteString m ()
@@ -89,6 +91,12 @@ data RemoteCacheSettings = RemoteCacheSettings
 
   , logsPrefix :: Text
   , logsViewUrl :: Text
+
+  -- | How many ranged GET requests to use when downloading a cache archive.
+  -- 1 (the default) means a single plain request for the whole object.
+  , s3DownloadConcurrency :: Int
+  -- | How many bytes a single ranged GET request asks for.
+  , s3DownloadChunkSize :: Int
   }
 
 getRemoteCacheSettingsFromEnv :: MonadIO m => m RemoteCacheSettings
@@ -101,7 +109,22 @@ getRemoteCacheSettingsFromEnv = liftIO do
   remoteCachePrefix <- maybe "taskrunner/" toText <$> lookupEnv "TASKRUNNER_REMOTE_CACHE_PREFIX"
   logsPrefix <- maybe (error "TASKRUNNER_LOGS_PREFIX not provided") toText <$> lookupEnv "TASKRUNNER_LOGS_PREFIX"
   logsViewUrl <- maybe (error "TASKRUNNER_LOGS_VIEW_URL not provided") toText <$> lookupEnv "TASKRUNNER_LOGS_VIEW_URL"
+  s3DownloadConcurrency <- lookupPositiveIntEnv "TASKRUNNER_S3_DOWNLOAD_CONCURRENCY" 1
+  s3DownloadChunkSizeMiB <- lookupPositiveIntEnv "TASKRUNNER_S3_DOWNLOAD_CHUNK_SIZE_MIB" 8
+  let s3DownloadChunkSize = s3DownloadChunkSizeMiB * 1024 * 1024
   pure RemoteCacheSettings{..}
+
+lookupPositiveIntEnv :: String -> Int -> IO Int
+lookupPositiveIntEnv name defaultValue =
+  lookupEnv name >>= \case
+    Nothing ->
+      pure defaultValue
+    Just str ->
+      case readMaybe str of
+        Just value | value > 0 ->
+          pure value
+        _ ->
+          error $ toText name <> " must be a positive integer, got: " <> show str
 
 parseEndpoint :: Text -> Maybe (Service -> Service)
 parseEndpoint "default-aws" = Just id
@@ -114,7 +137,6 @@ parseEndpoint s = do
     . (\svc -> svc { s3AddressingStyle = S3AddressingStylePath })
 
 -- TODO:
--- - report speed, size etc.
 -- - integrate amazonka logging
 -- - handle errors
 saveCache
@@ -145,13 +167,18 @@ saveCache appState settings relativeCacheRoot files archiveName = do
 
     logDebug appState $ "Uploading to s3://" <> bucket <> "/" <> objectKey
 
-    withStderrPipe appState \stderrHandle ->
+    packedBytes <- newIORef 0
+    uploadedBytes <- newIORef 0
+
+    (_, elapsed) <- timed $ withStderrPipe appState \stderrHandle ->
       runConduitRes do
         let multipartUpload = (newCreateMultipartUpload (BucketName bucket) (ObjectKey objectKey) :: CreateMultipartUpload)
               { storageClass = Just StorageClass_REDUCED_REDUNDANCY }
         result <-
           packTar appState stderrHandle cacheRoot filesRelativeToCacheRoot
+          .| countBytes packedBytes
           .| Zstd.compress 3
+          .| countBytes uploadedBytes
           .| streamUpload env Nothing multipartUpload
         case result of
           Left (_, err) ->
@@ -159,6 +186,19 @@ saveCache appState settings relativeCacheRoot files archiveName = do
           Right _ -> do
             liftIO $ logDebug appState "Upload success"
             pure ()
+
+    packed <- readIORef packedBytes
+    uploaded <- readIORef uploadedBytes
+    -- Note the rate covers the whole pipeline (tar, zstd and the upload), not
+    -- just the network part.
+    logDebug appState $ "Packed and uploaded " <> transferSummary uploaded elapsed
+      <> ", compressed from " <> toText (bytesfmt "%.2f" packed)
+
+-- | Pass data through unchanged, accumulating the total number of bytes seen.
+countBytes :: MonadIO m => IORef Int -> ConduitT BS.ByteString BS.ByteString m ()
+countBytes ref = C.awaitForever \chunk -> do
+  modifyIORef' ref (+ BS.length chunk)
+  C.yield chunk
 
 data LogMode = NoLog | Log deriving (Eq, Show)
 
@@ -181,14 +221,121 @@ restoreCache appState settings cacheRoot archiveName logMode = do
       logDebug appState $ "Remote cache archive not found s3://" <> bucket <> "/" <> objectKey
       pure False
 
-  handling _NoSuchKey onNoSuchKey $ withStderrPipe appState \stderrHandle ->
-    runConduitRes do
-      response <- AWS.send env $ newGetObject (BucketName bucket) (ObjectKey objectKey)
+    onFound =
       when (logMode == Log) do
-        liftIO $ logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
+        logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
+
+  handling _NoSuchKey onNoSuchKey $ withStderrPipe appState \stderrHandle -> do
+    downloadedBytes <- newIORef 0
+
+    (_, elapsed) <- timed $ runConduitRes $
+      downloadObject appState settings env (BucketName bucket) (ObjectKey objectKey) onFound
+        .| countBytes downloadedBytes
+        .| unpackTar appState stderrHandle cacheRoot
+
+    downloaded <- readIORef downloadedBytes
+    -- The size is that of the compressed archive, and the rate covers the whole
+    -- pipeline (the download, zstd and tar), not just the network part.
+    logDebug appState $ "Downloaded and unpacked " <> transferSummary downloaded elapsed
+
+    pure True
+
+-- | Stream an S3 object, using several parallel ranged GET requests when
+-- @s3DownloadConcurrency@ is above 1. A single stream tends to be limited well
+-- below the available bandwidth, so fetching a few ranges at once is
+-- noticeably faster for large archives.
+--
+-- Chunks are emitted strictly in order, so downstream sees the same byte stream
+-- either way.
+downloadObject
+  :: AppState
+  -> RemoteCacheSettings
+  -> AWS.Env
+  -> BucketName
+  -> ObjectKey
+  -> IO () -- ^ Called once the object is known to exist
+  -> ConduitT () BS.ByteString (ResourceT IO) ()
+downloadObject appState settings env bucket key onFound
+  | settings.s3DownloadConcurrency <= 1 = do
+      response <- AWS.send env $ newGetObject bucket key
+      liftIO onFound
       response.body.body
-            .| unpackTar appState stderrHandle cacheRoot
-      pure True
+  | otherwise = do
+      -- The first request doubles as the existence check (so that _NoSuchKey is
+      -- still thrown from here) and tells us the total size via Content-Range,
+      -- which is what lets us plan the remaining ranges without a separate
+      -- HeadObject request. Note that HeadObject would not do: S3 answers HEAD
+      -- with an empty body, so a missing object does not come back as
+      -- _NoSuchKey there.
+      firstResponse <- AWS.send env $ rangedGetObject bucket key (0, fromIntegral chunkSize - 1)
+      liftIO onFound
+
+      -- A 206 means the range was honoured and the body is only the first
+      -- chunk; anything else (a server ignoring Range, or an object smaller
+      -- than one chunk served whole) means we already have everything.
+      if firstResponse.httpStatus /= 206 then
+        firstResponse.body.body
+      else case parseContentRangeTotal =<< firstResponse.contentRange of
+        Nothing -> do
+          -- Partial response, but we cannot tell how much is left, so we cannot
+          -- safely stream this body and stop. Start over in a single request.
+          liftIO $ logWarn appState $ "Could not determine object size from Content-Range: "
+            <> show firstResponse.contentRange <> ", downloading in a single request"
+          response <- AWS.send env $ newGetObject bucket key
+          response.body.body
+        Just total -> do
+          liftIO $ logDebug appState $ "Object size: " <> toText (bytesfmt "%.2f" total)
+            <> ", downloading with concurrency " <> show settings.s3DownloadConcurrency
+          case chunkRanges chunkSize (fromIntegral chunkSize) total of
+            [] ->
+              -- Object fits in a single chunk, which we already have.
+              firstResponse.body.body
+            remainingRanges ->
+              -- Start prefetching the rest right away, so it overlaps with
+              -- streaming the first chunk downstream.
+              bracketP
+                (startPrefetch settings.s3DownloadConcurrency remainingRanges
+                  (fetchRange env bucket key))
+                cancelPrefetch
+                \prefetch -> do
+                  firstResponse.body.body
+                  let go = liftIO (nextPrefetch prefetch) >>= \case
+                        Nothing -> pure ()
+                        Just chunk -> C.yield chunk >> go
+                  go
+  where
+  chunkSize = max 1 settings.s3DownloadChunkSize
+
+-- | Download a single byte range of an object into memory.
+fetchRange :: AWS.Env -> BucketName -> ObjectKey -> (Integer, Integer) -> IO BS.ByteString
+fetchRange env bucket key range' =
+  AWS.runResourceT do
+    response <- AWS.send env $ rangedGetObject bucket key range'
+    BS.concat <$> C.runConduit (response.body.body .| sinkList)
+
+-- | A GET request for an inclusive byte range, as in the HTTP @Range@ header.
+rangedGetObject :: BucketName -> ObjectKey -> (Integer, Integer) -> GetObject
+rangedGetObject bucket key (start, end) =
+  (newGetObject bucket key)
+    { range = Just $ "bytes=" <> show start <> "-" <> show end }
+
+-- | Split @[start, total)@ into consecutive inclusive ranges of at most
+-- @chunkSize@ bytes each.
+chunkRanges :: Int -> Integer -> Integer -> [(Integer, Integer)]
+chunkRanges chunkSize start total
+  | start >= total = []
+  | otherwise =
+      (start, min (start + size) total - 1) : chunkRanges chunkSize (start + size) total
+  where
+  size = fromIntegral (max 1 chunkSize)
+
+-- | Total object size from a @Content-Range@ header value, e.g. the 52428800 in
+-- @bytes 0-8388607/52428800@. 'Nothing' if the size is unknown (@*@) or the
+-- header is malformed.
+parseContentRangeTotal :: Text -> Maybe Integer
+parseContentRangeTotal header = do
+  let total = Text.drop 1 $ Text.dropWhile (/= '/') header
+  readMaybe (toString total)
 
 getLatestBuildHash
   :: AppState

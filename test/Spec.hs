@@ -28,6 +28,7 @@ import Amazonka.S3.ListObjectsV2 (ListObjectsV2Response(..))
 import Amazonka.S3.Types.ObjectIdentifier (newObjectIdentifier)
 import Amazonka.S3.Types.Object (Object(..))
 import qualified FakeGithubApi
+import qualified DownloadTest
 
 main :: IO ()
 main = defaultMain =<< goldenTests
@@ -80,7 +81,8 @@ goldenTests = do
 
   System.IO.putStrLn $ "Running " <> show runningTests <> "/" <> show totalTests <> " tests"
   pure $ Tasty.withResource (FakeGithubApi.start fakeGithubPort) FakeGithubApi.stop \fakeGithubServer ->
-    testGroup "tests"
+    testGroup "tests" $
+      DownloadTest.tests :
       [ goldenVsStringDiff
           (takeBaseName inputFile) -- test name
           (\ref new -> ["diff", "-u", ref, new])

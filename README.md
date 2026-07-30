@@ -67,6 +67,8 @@ To use it, first build using another system, and the run `taskrunner` with `TASK
 
 - `TASKRUNNER_DEBUG` - whether to output debug messages to toplevel output. Note that debug messages are always written to per-task logs, regardless of this setting.
 - `TASKRUNNER_LOG_INFO` - whether to output "info" messages to toplevel output. They are minimal messages, produced only when there's actually something to be done (including fetching from cache).
+- `TASKRUNNER_S3_DOWNLOAD_CONCURRENCY` (default: `1`) - how many ranged `GET` requests to use in parallel when downloading a remote cache archive. A single stream is usually limited well below the available bandwidth, so raising this (e.g. to `8`) speeds up restoring large caches. `1` means a single plain request, as before. Transfer sizes and speeds are reported as debug messages.
+- `TASKRUNNER_S3_DOWNLOAD_CHUNK_SIZE_MIB` (default: `8`) - how much a single ranged `GET` request asks for. At most `TASKRUNNER_S3_DOWNLOAD_CONCURRENCY + 1` chunks are held in memory at a time.
 - more...
 
 ## Possible features

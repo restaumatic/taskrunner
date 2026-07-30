@@ -84,7 +84,7 @@ stack test --test-arguments --accept
 ## Notes
 - This project uses tasty-golden for snapshot/golden file testing
 - The test suite includes integration tests that verify taskrunner behavior
-- **S3 Test Auto-Detection**: 15 tests require S3 credentials (marked with `# s3` directive in test files)
+- **S3 Test Auto-Detection**: 16 tests require S3 credentials (marked with `# s3` directive in test files)
   - `stack test` automatically skips S3 tests if credentials are missing
   - To run S3 tests, set: `TASKRUNNER_TEST_S3_ENDPOINT`, `TASKRUNNER_TEST_S3_ACCESS_KEY`, `TASKRUNNER_TEST_S3_SECRET_KEY`
   - Use `SKIP_S3_TESTS=1` to explicitly skip S3 tests even when credentials are present

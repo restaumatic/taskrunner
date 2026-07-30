@@ -1,0 +1,46 @@
+# no toplevel
+# s3
+
+export TASKRUNNER_SAVE_REMOTE_CACHE=1
+
+# Download the archive using several ranged GET requests. Chunk size is small so
+# that a few megabytes are enough to span multiple chunks.
+export TASKRUNNER_S3_DOWNLOAD_CONCURRENCY=4
+export TASKRUNNER_S3_DOWNLOAD_CHUNK_SIZE_MIB=1
+
+mkdir a
+
+(
+  cd a
+  # Deterministic, but incompressible - so that the archive actually stays big
+  # enough to be downloaded in several chunks.
+  head -c 3000000 /dev/zero | openssl enc -aes-256-ctr -pass pass:taskrunner -nosalt 2>/dev/null > input.bin
+  git init -q
+  git add input.bin
+  git commit -qm "Add input.bin"
+)
+
+cp -r a b
+
+go() {
+  # Note: we want separate workdir for separate repos
+  TASKRUNNER_STATE_DIRECTORY="$(pwd)" taskrunner -n mytask bash -e -c '
+    snapshot input.bin --outputs output.bin
+    echo "Expensive computation"
+    cp input.bin output.bin
+  '
+}
+
+(
+  cd a
+  go
+  sha1sum output.bin
+)
+
+(
+  cd b
+  # Should download the cache instead of running the task, and the restored
+  # output must be byte-identical.
+  go
+  sha1sum output.bin
+)

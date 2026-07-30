@@ -28,6 +28,7 @@ library
       App
       CliArgs
       CommitStatus
+      Control.Concurrent.Prefetch
       Control.Monad.EarlyReturn
       RemoteCache
       SnapshotCliArgs
@@ -107,6 +108,7 @@ library
     , process
     , random
     , resourcet
+    , stm
     , tar
     , tar-conduit
     , temporary
@@ -193,6 +195,7 @@ executable taskrunner
     , process
     , random
     , resourcet
+    , stm
     , tar
     , tar-conduit
     , taskrunner
@@ -209,7 +212,9 @@ test-suite taskrunner-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      DownloadTest
       FakeGithubApi
+      FakeS3
       Paths_taskrunner
   autogen-modules:
       Paths_taskrunner
@@ -282,6 +287,7 @@ test-suite taskrunner-test
     , process
     , random
     , resourcet
+    , stm
     , tar
     , tar-conduit
     , taskrunner

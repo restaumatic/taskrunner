@@ -9,19 +9,19 @@ import Conduit (runResourceT, sinkList)
 import qualified Amazonka as AWS
 import Amazonka.Auth (fromKeys)
 import Amazonka.Env (newEnv, Env'(..), overrideService)
-import Amazonka.S3 (BucketName(..), ObjectKey(..))
+import Amazonka.S3 (BucketName(..), ObjectKey(..), _NoSuchKey)
 import Amazonka.Types (AccessKey(..), Region(..), SecretKey(..))
+import Control.Exception.Lens (handling)
 import qualified Data.ByteString as BS
-import Data.Conduit ((.|))
+import Data.Conduit ((.|), bracketP)
 import qualified Data.Conduit as C
 import qualified Data.Text as Text
-import RemoteCache (RemoteCacheSettings(..), downloadObject, parseEndpoint)
-import System.IO (IOMode(..))
+import RemoteCache (RemoteCacheSettings(..), parseEndpoint, startDownload)
 import Test.Tasty (TestTree)
 import Test.Tasty.Golden (goldenVsStringDiff)
 import Types
 
-import FakeS3 (Behaviour(..), RequestLog, withFakeS3)
+import FakeS3 (Behaviour(..), withFakeS3)
 
 mib :: Int
 mib = 1024 * 1024
@@ -32,7 +32,10 @@ tests =
     "download-object"
     (\ref new -> ["diff", "-u", ref, new])
     "test/download-object.out"
-    (encodeUtf8 . unlines <$> mapM runCase cases)
+    do
+      results <- mapM runCase cases
+      missing <- missingObjectCase
+      pure $ encodeUtf8 $ unlines $ results <> [missing]
 
 data Case = Case
   { name :: Text
@@ -125,17 +128,41 @@ runCase testCase = do
   appState <- mkAppState
   withFakeS3 testCase.behaviour object \requestLog port -> do
     env <- mkEnv port
-    result <- tryDownload appState (mkSettings port testCase) env
+    result <- tryDownload appState (mkSettings port testCase.concurrency testCase.chunkSize) env
     requests <- readIORef requestLog
     pure $ testCase.name <> ": " <> testCase.expected testCase.objectSize result requests
 
 tryDownload
   :: AppState -> RemoteCacheSettings -> AWS.Env -> IO (Either Text ByteString)
 tryDownload appState settings env = do
-  result <- try @IO @SomeException $ runResourceT $ C.runConduit $
-    downloadObject appState settings env (BucketName "bucket") (ObjectKey "obj") pass
-      .| (BS.concat <$> sinkList)
+  result <- try @IO @SomeException $ runResourceT do
+    source <- startDownload appState settings env (BucketName "bucket") (ObjectKey "obj")
+    C.runConduit $ source .| (BS.concat <$> sinkList)
   pure $ first (Text.unwords . Text.words . Text.take 200 . show) result
+
+-- | A missing object has to be reported before anything downstream is started
+-- up. 'restoreCache' relies on that: conduit initialises sinks before pulling
+-- from the source, so if the initial request were part of the pipeline, tar
+-- would already be running by the time the cache miss surfaced - and would
+-- report a confusing error about its empty input on every cache miss.
+missingObjectCase :: IO Text
+missingObjectCase = do
+  appState <- mkAppState
+  withFakeS3 MissingObject "" \_ port -> do
+    env <- mkEnv port
+    let settings = mkSettings port 4 mib
+    sinkStarted <- newIORef False
+    outcome <- handling _NoSuchKey (\_ -> pure "reported as NoSuchKey") do
+      runResourceT do
+        source <- startDownload appState settings env (BucketName "bucket") (ObjectKey "obj")
+        C.runConduit $ source .| recordStartup sinkStarted
+      pure "NOT REPORTED"
+    started <- readIORef sinkStarted
+    pure $ "missing object: " <> outcome <> ", downstream started: " <> show started
+  where
+  -- Stands in for unpackTar: it is the bracketP allocation that spawns tar.
+  recordStartup ref =
+    bracketP (writeIORef ref True) (\() -> pass) \() -> C.awaitForever \_ -> pass
 
 -- | Deterministic filler that zstd cannot squash, so that test objects actually
 -- stay big enough to span several chunks.
@@ -153,8 +180,8 @@ mkEnv port = do
     <&> (\env -> env { region = Region' "eu-central-1", logger = \_ _ -> pass })
       . overrideService endpointFn
 
-mkSettings :: Int -> Case -> RemoteCacheSettings
-mkSettings port testCase = RemoteCacheSettings
+mkSettings :: Int -> Int -> Int -> RemoteCacheSettings
+mkSettings port concurrency chunkSize = RemoteCacheSettings
   { s3Endpoint = "http://localhost:" <> show port
   , awsRegion = "eu-central-1"
   , awsAccessKey = "key"
@@ -163,8 +190,8 @@ mkSettings port testCase = RemoteCacheSettings
   , remoteCachePrefix = ""
   , logsPrefix = ""
   , logsViewUrl = ""
-  , s3DownloadConcurrency = testCase.concurrency
-  , s3DownloadChunkSize = testCase.chunkSize
+  , s3DownloadConcurrency = concurrency
+  , s3DownloadChunkSize = chunkSize
   }
 
 -- | Just enough 'AppState' for the logging that 'downloadObject' does. Log

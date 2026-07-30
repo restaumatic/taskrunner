@@ -7,3 +7,4 @@ concurrency 1 does not use ranges: ok in 1 request(s), range headers: [Nothing]
 server ignores Range: ok in 1 request(s)
 server hides the object size: ok in 2 request(s)
 a chunk fails: failed, as expected
+missing object: reported as NoSuchKey, downstream started: False

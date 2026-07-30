@@ -3,7 +3,7 @@ module RemoteCache where
 
 import Universum
 
-import Control.Monad.Trans.Resource (MonadResource, ResourceT)
+import Control.Monad.Trans.Resource (MonadResource, ResourceT, runResourceT)
 import Amazonka.Env (newEnv, Env'(..), overrideService)
 import Amazonka.S3 (BucketName(..), ObjectKey(..), newGetObject, _NoSuchKey, StorageClass (StorageClass_REDUCED_REDUNDANCY))
 import Amazonka.S3.GetObject (GetObject(..), GetObjectResponse(..))
@@ -221,17 +221,20 @@ restoreCache appState settings cacheRoot archiveName logMode = do
       logDebug appState $ "Remote cache archive not found s3://" <> bucket <> "/" <> objectKey
       pure False
 
-    onFound =
-      when (logMode == Log) do
-        logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
-
   handling _NoSuchKey onNoSuchKey $ withStderrPipe appState \stderrHandle -> do
     downloadedBytes <- newIORef 0
 
-    (_, elapsed) <- timed $ runConduitRes $
-      downloadObject appState settings env (BucketName bucket) (ObjectKey objectKey) onFound
-        .| countBytes downloadedBytes
-        .| unpackTar appState stderrHandle cacheRoot
+    (_, elapsed) <- timed $ runResourceT do
+      source <- startDownload appState settings env (BucketName bucket) (ObjectKey objectKey)
+
+      -- Only now that the archive is known to exist: say so, and start unpacking.
+      when (logMode == Log) do
+        logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
+
+      C.runConduit $
+        source
+          .| countBytes downloadedBytes
+          .| unpackTar appState stderrHandle cacheRoot
 
     downloaded <- readIORef downloadedBytes
     -- The size is that of the compressed archive, and the rate covers the whole
@@ -240,26 +243,32 @@ restoreCache appState settings cacheRoot archiveName logMode = do
 
     pure True
 
--- | Stream an S3 object, using several parallel ranged GET requests when
--- @s3DownloadConcurrency@ is above 1. A single stream tends to be limited well
--- below the available bandwidth, so fetching a few ranges at once is
--- noticeably faster for large archives.
+-- | Make the initial request for an S3 object, and return a source streaming its
+-- contents. Uses several parallel ranged GET requests when
+-- @s3DownloadConcurrency@ is above 1: a single stream tends to be limited well
+-- below the available bandwidth, so fetching a few ranges at once is noticeably
+-- faster for large archives.
 --
 -- Chunks are emitted strictly in order, so downstream sees the same byte stream
 -- either way.
-downloadObject
+--
+-- Note the first request deliberately happens before the returned source is
+-- consumed, so that a missing object is reported (as '_NoSuchKey') before the
+-- caller starts anything else. Conduit initialises sinks before pulling from the
+-- source, so folding this into the pipeline would mean 'unpackTar' had already
+-- spawned tar by the time we found out, which then complains about its empty
+-- input on every cache miss.
+startDownload
   :: AppState
   -> RemoteCacheSettings
   -> AWS.Env
   -> BucketName
   -> ObjectKey
-  -> IO () -- ^ Called once the object is known to exist
-  -> ConduitT () BS.ByteString (ResourceT IO) ()
-downloadObject appState settings env bucket key onFound
+  -> ResourceT IO (ConduitT () BS.ByteString (ResourceT IO) ())
+startDownload appState settings env bucket key
   | settings.s3DownloadConcurrency <= 1 = do
       response <- AWS.send env $ newGetObject bucket key
-      liftIO onFound
-      response.body.body
+      pure response.body.body
   | otherwise = do
       -- The first request doubles as the existence check (so that _NoSuchKey is
       -- still thrown from here) and tells us the total size via Content-Range,
@@ -268,32 +277,31 @@ downloadObject appState settings env bucket key onFound
       -- with an empty body, so a missing object does not come back as
       -- _NoSuchKey there.
       firstResponse <- AWS.send env $ rangedGetObject bucket key (0, fromIntegral chunkSize - 1)
-      liftIO onFound
 
       -- A 206 means the range was honoured and the body is only the first
       -- chunk; anything else (a server ignoring Range, or an object smaller
       -- than one chunk served whole) means we already have everything.
       if firstResponse.httpStatus /= 206 then
-        firstResponse.body.body
+        pure firstResponse.body.body
       else case parseContentRangeTotal =<< firstResponse.contentRange of
         Nothing -> do
           -- Partial response, but we cannot tell how much is left, so we cannot
           -- safely stream this body and stop. Start over in a single request.
-          liftIO $ logWarn appState $ "Could not determine object size from Content-Range: "
+          logWarn appState $ "Could not determine object size from Content-Range: "
             <> show firstResponse.contentRange <> ", downloading in a single request"
           response <- AWS.send env $ newGetObject bucket key
-          response.body.body
+          pure response.body.body
         Just total -> do
-          liftIO $ logDebug appState $ "Object size: " <> toText (bytesfmt "%.2f" total)
+          logDebug appState $ "Object size: " <> toText (bytesfmt "%.2f" total)
             <> ", downloading with concurrency " <> show settings.s3DownloadConcurrency
           case chunkRanges chunkSize (fromIntegral chunkSize) total of
             [] ->
               -- Object fits in a single chunk, which we already have.
-              firstResponse.body.body
+              pure firstResponse.body.body
             remainingRanges ->
               -- Start prefetching the rest right away, so it overlaps with
               -- streaming the first chunk downstream.
-              bracketP
+              pure $ bracketP
                 (startPrefetch settings.s3DownloadConcurrency remainingRanges
                   (fetchRange env bucket key))
                 cancelPrefetch

@@ -26,6 +26,8 @@ data Behaviour
     -- ^ Answer with 206, but without disclosing the object size.
   | FailAtOffset Int
     -- ^ Fail requests for the range starting at the given offset.
+  | MissingObject
+    -- ^ Answer everything the way S3 reports an object that is not there.
   deriving (Eq, Show)
 
 -- | Range header of every request the server received, in arrival order.
@@ -44,6 +46,9 @@ app behaviour object requestLog request respond = do
   let whole = respond $ Wai.responseLBS HTTP.status200
         [("Content-Length", show (BS.length object))] (LBS.fromStrict object)
   case (behaviour, m_range >>= parseRange) of
+    (MissingObject, _) ->
+      respond $ Wai.responseLBS HTTP.status404 []
+        "<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>"
     (IgnoreRange, _) ->
       whole
     (_, Nothing) ->

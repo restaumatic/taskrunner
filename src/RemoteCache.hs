@@ -26,7 +26,7 @@ import Network.URI (parseURI, URI (..), URIAuth(..))
 import System.Directory (makeAbsolute, canonicalizePath)
 import System.FilePath (makeRelative)
 import qualified System.FilePath as FP
-import Utils (bail, logDebug, logFileName, logInfo, withStderrPipe)
+import Utils (bail, bytesfmt, logDebug, logFileName, logInfo, timed, transferSummary, withStderrPipe)
 import qualified Amazonka as AWS
 import Control.Exception.Lens (handling)
 import System.Exit (ExitCode(..))
@@ -114,7 +114,6 @@ parseEndpoint s = do
     . (\svc -> svc { s3AddressingStyle = S3AddressingStylePath })
 
 -- TODO:
--- - report speed, size etc.
 -- - integrate amazonka logging
 -- - handle errors
 saveCache
@@ -145,13 +144,18 @@ saveCache appState settings relativeCacheRoot files archiveName = do
 
     logDebug appState $ "Uploading to s3://" <> bucket <> "/" <> objectKey
 
-    withStderrPipe appState \stderrHandle ->
+    packedBytes <- newIORef 0
+    uploadedBytes <- newIORef 0
+
+    (_, elapsed) <- timed $ withStderrPipe appState \stderrHandle ->
       runConduitRes do
         let multipartUpload = (newCreateMultipartUpload (BucketName bucket) (ObjectKey objectKey) :: CreateMultipartUpload)
               { storageClass = Just StorageClass_REDUCED_REDUNDANCY }
         result <-
           packTar appState stderrHandle cacheRoot filesRelativeToCacheRoot
+          .| countBytes packedBytes
           .| Zstd.compress 3
+          .| countBytes uploadedBytes
           .| streamUpload env Nothing multipartUpload
         case result of
           Left (_, err) ->
@@ -159,6 +163,19 @@ saveCache appState settings relativeCacheRoot files archiveName = do
           Right _ -> do
             liftIO $ logDebug appState "Upload success"
             pure ()
+
+    packed <- readIORef packedBytes
+    uploaded <- readIORef uploadedBytes
+    -- Note the rate covers the whole pipeline (tar, zstd and the upload), not
+    -- just the network part.
+    logDebug appState $ "Packed and uploaded " <> transferSummary uploaded elapsed
+      <> ", compressed from " <> toText (bytesfmt "%.2f" packed)
+
+-- | Pass data through unchanged, accumulating the total number of bytes seen.
+countBytes :: MonadIO m => IORef Int -> ConduitT BS.ByteString BS.ByteString m ()
+countBytes ref = C.awaitForever \chunk -> do
+  modifyIORef' ref (+ BS.length chunk)
+  C.yield chunk
 
 data LogMode = NoLog | Log deriving (Eq, Show)
 
@@ -181,14 +198,23 @@ restoreCache appState settings cacheRoot archiveName logMode = do
       logDebug appState $ "Remote cache archive not found s3://" <> bucket <> "/" <> objectKey
       pure False
 
-  handling _NoSuchKey onNoSuchKey $ withStderrPipe appState \stderrHandle ->
-    runConduitRes do
+  handling _NoSuchKey onNoSuchKey $ withStderrPipe appState \stderrHandle -> do
+    downloadedBytes <- newIORef 0
+
+    (_, elapsed) <- timed $ runConduitRes do
       response <- AWS.send env $ newGetObject (BucketName bucket) (ObjectKey objectKey)
       when (logMode == Log) do
         liftIO $ logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
       response.body.body
+            .| countBytes downloadedBytes
             .| unpackTar appState stderrHandle cacheRoot
-      pure True
+
+    downloaded <- readIORef downloadedBytes
+    -- The size is that of the compressed archive, and the rate covers the whole
+    -- pipeline (the download, zstd and tar), not just the network part.
+    logDebug appState $ "Downloaded and unpacked " <> transferSummary downloaded elapsed
+
+    pure True
 
 getLatestBuildHash
   :: AppState

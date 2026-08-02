@@ -129,7 +129,7 @@ unpackTarParallel appState stderrHandle workdir workerCount = do
                       copyExactly pipe padded
                       loop (next + 1) [] Nothing
 
-    (_, splitSeconds) <- timed $ loop (0 :: Int) [] Nothing
+    loop (0 :: Int) [] Nothing
 
     liftIO do
       (_, drainSeconds) <- timed do
@@ -140,11 +140,14 @@ unpackTarParallel appState stderrHandle workdir workerCount = do
       (_, deferredSeconds) <- timed $ unless (null deferred) $ runDeferredPass deferred
 
       entries <- readIORef entriesRef
+      -- No figure for the feed loop itself: it blocks whenever a worker's pipe
+      -- is full, so its wall clock conflated this thread's work with waiting for
+      -- tar. 'restoreCache' attributes that properly, via a tap either side of
+      -- zstd.
       logDebug appState $ "Unpacked " <> show entries <> " entries using "
-        <> show workerCount <> " tar processes - splitting " <> formatSeconds splitSeconds
-        <> ", draining " <> formatSeconds drainSeconds
-        <> ", " <> show (length deferred) <> " directories and hardlinks in "
-        <> formatSeconds deferredSeconds
+        <> show workerCount <> " tar processes (" <> show (length deferred)
+        <> " directories and hardlinks in " <> formatSeconds deferredSeconds
+        <> ", workers drained in " <> formatSeconds drainSeconds <> ")"
   where
   tarCmd = "tar"
   tarArgs = ["-x"]

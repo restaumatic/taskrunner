@@ -99,13 +99,17 @@ timed action = do
   end <- liftIO getMonotonicTime
   pure (result, end - start)
 
+-- | Format a duration in seconds, e.g. @"1.50s"@.
+formatSeconds :: Double -> Text
+formatSeconds seconds = toText (printf "%.2fs" seconds :: String)
+
 -- | Describe a transfer of @bytes@ bytes taking @seconds@ seconds.
 --
 -- >>> transferSummary 12345678 1.5
 -- "11.77 MiB in 1.50s (7.85 MiB/s)"
 transferSummary :: Int -> Double -> Text
 transferSummary bytes seconds =
-  toText (bytesfmt "%.2f" bytes) <> " in " <> toText (printf "%.2fs" seconds :: String) <> rate
+  toText (bytesfmt "%.2f" bytes) <> " in " <> formatSeconds seconds <> rate
   where
   rate
     -- Below that the rate is mostly measurement noise, and dividing by a very

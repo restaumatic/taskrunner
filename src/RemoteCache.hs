@@ -26,7 +26,7 @@ import Network.URI (parseURI, URI (..), URIAuth(..))
 import System.Directory (makeAbsolute, canonicalizePath)
 import System.FilePath (makeRelative)
 import qualified System.FilePath as FP
-import Utils (bail, bytesfmt, logDebug, logFileName, logInfo, timed, transferSummary, withStderrPipe)
+import Utils (bail, bytesfmt, formatSeconds, logDebug, logFileName, logInfo, timed, transferSummary, withStderrPipe)
 import qualified Amazonka as AWS
 import Control.Exception.Lens (handling)
 import System.Exit (ExitCode(..))
@@ -35,6 +35,7 @@ import qualified Data.Conduit.Text as CT
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
 import Amazonka.S3.PutObject (newPutObject, PutObject(..))
+import GHC.Clock (getMonotonicTime)
 
 
 packTar :: MonadResource m => AppState -> Handle -> FilePath -> [FilePath] -> ConduitT () BS.ByteString m ()
@@ -145,7 +146,7 @@ saveCache appState settings relativeCacheRoot files archiveName = do
     logDebug appState $ "Uploading to s3://" <> bucket <> "/" <> objectKey
 
     packedBytes <- newIORef 0
-    uploadedBytes <- newIORef 0
+    uploadStatsRef <- newIORef emptyTransferStats
 
     (_, elapsed) <- timed $ withStderrPipe appState \stderrHandle ->
       runConduitRes do
@@ -155,7 +156,7 @@ saveCache appState settings relativeCacheRoot files archiveName = do
           packTar appState stderrHandle cacheRoot filesRelativeToCacheRoot
           .| countBytes packedBytes
           .| Zstd.compress 3
-          .| countBytes uploadedBytes
+          .| measureTransfer uploadStatsRef
           .| streamUpload env Nothing multipartUpload
         case result of
           Left (_, err) ->
@@ -165,17 +166,66 @@ saveCache appState settings relativeCacheRoot files archiveName = do
             pure ()
 
     packed <- readIORef packedBytes
-    uploaded <- readIORef uploadedBytes
+    uploadStats <- readIORef uploadStatsRef
     -- Note the rate covers the whole pipeline (tar, zstd and the upload), not
-    -- just the network part.
-    logDebug appState $ "Packed and uploaded " <> transferSummary uploaded elapsed
+    -- just the network part - hence the split, which says which to blame.
+    logDebug appState $ "Packed and uploaded " <> transferSummary uploadStats.bytes elapsed
       <> ", compressed from " <> toText (bytesfmt "%.2f" packed)
+      <> " - packing and compressing " <> formatSeconds uploadStats.producingSeconds
+      <> ", uploading " <> formatSeconds uploadStats.consumingSeconds
 
 -- | Pass data through unchanged, accumulating the total number of bytes seen.
 countBytes :: MonadIO m => IORef Int -> ConduitT BS.ByteString BS.ByteString m ()
 countBytes ref = C.awaitForever \chunk -> do
   modifyIORef' ref (+ BS.length chunk)
   C.yield chunk
+
+-- | Bytes seen, and how the wall clock divided between producing them and
+-- consuming them.
+data TransferStats = TransferStats
+  { bytes :: !Int
+  , producingSeconds :: !Double
+  , consumingSeconds :: !Double
+  }
+
+emptyTransferStats :: TransferStats
+emptyTransferStats = TransferStats
+  { bytes = 0
+  , producingSeconds = 0
+  , consumingSeconds = 0
+  }
+
+-- | Pass data through unchanged, recording how much of the time went into
+-- waiting for upstream to produce data versus waiting for downstream to consume
+-- it.
+--
+-- Conduit runs the two strictly alternately - 'C.await' returns once upstream
+-- has a chunk, and 'C.yield' returns once downstream wants the next one - so
+-- this is an exact attribution of this pipeline's wall clock, not a sample.
+--
+-- Note it measures *waiting*. Downstream applies backpressure, so a slow
+-- consumer does not inflate the producing side: time is only counted there when
+-- no data was available yet.
+measureTransfer :: MonadIO m => IORef TransferStats -> ConduitT BS.ByteString BS.ByteString m ()
+measureTransfer ref = loop
+  where
+  loop = do
+    beforeAwait <- liftIO getMonotonicTime
+    m_chunk <- C.await
+    afterAwait <- liftIO getMonotonicTime
+    case m_chunk of
+      Nothing ->
+        liftIO $ modifyIORef' ref \stats -> stats
+          { producingSeconds = stats.producingSeconds + (afterAwait - beforeAwait) }
+      Just chunk -> do
+        C.yield chunk
+        afterYield <- liftIO getMonotonicTime
+        liftIO $ modifyIORef' ref \stats -> stats
+          { bytes = stats.bytes + BS.length chunk
+          , producingSeconds = stats.producingSeconds + (afterAwait - beforeAwait)
+          , consumingSeconds = stats.consumingSeconds + (afterYield - afterAwait)
+          }
+        loop
 
 data LogMode = NoLog | Log deriving (Eq, Show)
 
@@ -199,20 +249,24 @@ restoreCache appState settings cacheRoot archiveName logMode = do
       pure False
 
   handling _NoSuchKey onNoSuchKey $ withStderrPipe appState \stderrHandle -> do
-    downloadedBytes <- newIORef 0
+    statsRef <- newIORef emptyTransferStats
 
     (_, elapsed) <- timed $ runConduitRes do
       response <- AWS.send env $ newGetObject (BucketName bucket) (ObjectKey objectKey)
       when (logMode == Log) do
         liftIO $ logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
       response.body.body
-            .| countBytes downloadedBytes
+            .| measureTransfer statsRef
             .| unpackTar appState stderrHandle cacheRoot
 
-    downloaded <- readIORef downloadedBytes
+    stats <- readIORef statsRef
     -- The size is that of the compressed archive, and the rate covers the whole
-    -- pipeline (the download, zstd and tar), not just the network part.
-    logDebug appState $ "Downloaded and unpacked " <> transferSummary downloaded elapsed
+    -- pipeline (the download, zstd and tar), not just the network part - hence
+    -- the split, which says which of the two to blame. Note the download side
+    -- excludes connection setup, which happened above in AWS.send.
+    logDebug appState $ "Downloaded and unpacked " <> transferSummary stats.bytes elapsed
+      <> " - downloading " <> formatSeconds stats.producingSeconds
+      <> ", unpacking " <> formatSeconds stats.consumingSeconds
 
     pure True
 

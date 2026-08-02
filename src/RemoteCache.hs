@@ -145,7 +145,9 @@ saveCache appState settings relativeCacheRoot files archiveName = do
 
     logDebug appState $ "Uploading to s3://" <> bucket <> "/" <> objectKey
 
-    packedBytes <- newIORef 0
+    -- Taps either side of zstd, so a slow save can be pinned on reading the
+    -- files, on compressing them, or on the network.
+    packStatsRef <- newIORef emptyTransferStats
     uploadStatsRef <- newIORef emptyTransferStats
 
     (_, elapsed) <- timed $ withStderrPipe appState \stderrHandle ->
@@ -154,7 +156,7 @@ saveCache appState settings relativeCacheRoot files archiveName = do
               { storageClass = Just StorageClass_REDUCED_REDUNDANCY }
         result <-
           packTar appState stderrHandle cacheRoot filesRelativeToCacheRoot
-          .| countBytes packedBytes
+          .| measureTransfer packStatsRef
           .| Zstd.compress 3
           .| measureTransfer uploadStatsRef
           .| streamUpload env Nothing multipartUpload
@@ -165,20 +167,22 @@ saveCache appState settings relativeCacheRoot files archiveName = do
             liftIO $ logDebug appState "Upload success"
             pure ()
 
-    packed <- readIORef packedBytes
+    packStats <- readIORef packStatsRef
     uploadStats <- readIORef uploadStatsRef
-    -- Note the rate covers the whole pipeline (tar, zstd and the upload), not
-    -- just the network part - hence the split, which says which to blame.
+    -- The two taps nest rather than partition: when zstd wants input it pulls
+    -- through the upstream tap, so the time the upload tap spent waiting for
+    -- zstd already contains the time spent waiting for tar. Subtracting leaves
+    -- compression on its own, and the three then add up to the elapsed time.
+    let readingSeconds = packStats.producingSeconds
+        compressionSeconds = max 0 (uploadStats.producingSeconds - packStats.producingSeconds)
+        uploadSeconds = uploadStats.consumingSeconds
+    -- Largest figure is the bottleneck. See 'measureTransfer' for why the
+    -- network one is a lower bound.
     logDebug appState $ "Packed and uploaded " <> transferSummary uploadStats.bytes elapsed
-      <> ", compressed from " <> toText (bytesfmt "%.2f" packed)
-      <> " - packing and compressing " <> formatSeconds uploadStats.producingSeconds
-      <> ", uploading " <> formatSeconds uploadStats.consumingSeconds
-
--- | Pass data through unchanged, accumulating the total number of bytes seen.
-countBytes :: MonadIO m => IORef Int -> ConduitT BS.ByteString BS.ByteString m ()
-countBytes ref = C.awaitForever \chunk -> do
-  modifyIORef' ref (+ BS.length chunk)
-  C.yield chunk
+      <> ", compressed from " <> toText (bytesfmt "%.2f" packStats.bytes)
+      <> " - blocked on reading files " <> formatSeconds readingSeconds
+      <> ", on compression " <> formatSeconds compressionSeconds
+      <> ", on upload " <> formatSeconds uploadSeconds
 
 -- | Bytes seen, and how the wall clock divided between producing them and
 -- consuming them.
@@ -195,17 +199,24 @@ emptyTransferStats = TransferStats
   , consumingSeconds = 0
   }
 
--- | Pass data through unchanged, recording how much of the time went into
--- waiting for upstream to produce data versus waiting for downstream to consume
--- it.
+-- | Pass data through unchanged, recording how long the pipeline sat blocked
+-- waiting for upstream to hand over a chunk versus blocked waiting for
+-- downstream to accept one.
 --
 -- Conduit runs the two strictly alternately - 'C.await' returns once upstream
 -- has a chunk, and 'C.yield' returns once downstream wants the next one - so
--- this is an exact attribution of this pipeline's wall clock, not a sample.
+-- together these account for the pipeline's whole wall clock.
 --
--- Note it measures *waiting*. Downstream applies backpressure, so a slow
--- consumer does not inflate the producing side: time is only counted there when
--- no data was available yet.
+-- These are *stall* times, not time spent doing the work, and for I/O the two
+-- differ. A @write@ to a socket returns as soon as the data is copied into the
+-- kernel's send buffer; the kernel then transmits it while the next chunk is
+-- being compressed. So the transfer overlaps the rest of the pipeline and is
+-- undercounted here - if the pipeline is CPU-bound the writes cost almost
+-- nothing. Reads are the mirror image: data accumulates in the receive buffer
+-- while we are busy, so an 'await' that finds it already there costs nothing.
+--
+-- Read these numbers as "where did the pipeline stall", which is what identifies
+-- the bottleneck. Do not read them as "how long the bytes spent in transit".
 measureTransfer :: MonadIO m => IORef TransferStats -> ConduitT BS.ByteString BS.ByteString m ()
 measureTransfer ref = loop
   where
@@ -260,13 +271,14 @@ restoreCache appState settings cacheRoot archiveName logMode = do
             .| unpackTar appState stderrHandle cacheRoot
 
     stats <- readIORef statsRef
-    -- The size is that of the compressed archive, and the rate covers the whole
-    -- pipeline (the download, zstd and tar), not just the network part - hence
-    -- the split, which says which of the two to blame. Note the download side
-    -- excludes connection setup, which happened above in AWS.send.
+    -- The size is that of the compressed archive. Only a two-way split is
+    -- available here: zstd runs inside tar, so decompression cannot be
+    -- distinguished from the file writes. Note the download side excludes
+    -- connection setup, which happened above in AWS.send, and see
+    -- 'measureTransfer' for why it is a lower bound.
     logDebug appState $ "Downloaded and unpacked " <> transferSummary stats.bytes elapsed
-      <> " - downloading " <> formatSeconds stats.producingSeconds
-      <> ", unpacking " <> formatSeconds stats.consumingSeconds
+      <> " - blocked on download " <> formatSeconds stats.producingSeconds
+      <> ", on decompression and unpacking " <> formatSeconds stats.consumingSeconds
 
     pure True
 

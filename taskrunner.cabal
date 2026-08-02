@@ -29,6 +29,7 @@ library
       CliArgs
       CommitStatus
       Control.Monad.EarlyReturn
+      ParallelUnpack
       RemoteCache
       SnapshotCliArgs
       Trace

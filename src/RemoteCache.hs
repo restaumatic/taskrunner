@@ -36,6 +36,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
 import Amazonka.S3.PutObject (newPutObject, PutObject(..))
 import GHC.Clock (getMonotonicTime)
+import ParallelUnpack (unpackTarParallel)
 
 
 packTar :: MonadResource m => AppState -> Handle -> FilePath -> [FilePath] -> ConduitT () BS.ByteString m ()
@@ -57,6 +58,19 @@ packTar appState stderrHandle workdir files = do
            liftIO $ bail $ "tar pack command failed with code: " <> show exitCode
        _ ->
          error "unable to obtain stdout pipe"
+
+-- | Unpack a compressed archive into @workdir@.
+--
+-- With more than one unpack worker the stream is decompressed here and split
+-- across concurrent tar processes, which is much faster for the many-small-files
+-- trees that caches usually hold. The archive format is the same either way, so
+-- this reads bundles saved by any version.
+unpack :: MonadResource m => AppState -> Handle -> FilePath -> ConduitT BS.ByteString Void m ()
+unpack appState stderrHandle workdir
+  | appState.settings.unpackWorkers > 1 =
+      Zstd.decompress .| unpackTarParallel appState stderrHandle workdir appState.settings.unpackWorkers
+  | otherwise =
+      unpackTar appState stderrHandle workdir
 
 unpackTar :: MonadResource m => AppState -> Handle -> FilePath -> ConduitT BS.ByteString Void m ()
 unpackTar appState stderrHandle workdir = do
@@ -257,7 +271,7 @@ restoreCache appState settings cacheRoot archiveName logMode = do
         liftIO $ logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
       response.body.body
             .| measureTransfer statsRef
-            .| unpackTar appState stderrHandle cacheRoot
+            .| unpack appState stderrHandle cacheRoot
 
     stats <- readIORef statsRef
     -- The size is that of the compressed archive, and the rate covers the whole

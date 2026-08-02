@@ -24,6 +24,7 @@ data Settings = Settings
   , githubTokenRefreshThresholdSeconds :: Int
   , trace :: Bool
   , traceFiles :: Bool
+  , unpackWorkers :: Int
   } deriving (Show)
 
 type JobName = String

@@ -1,0 +1,70 @@
+# no toplevel
+# s3
+
+# The remote cache is unpacked by several tar processes at once (see
+# ParallelUnpack). Check that a tree containing the awkward cases - nested and
+# empty directories, a symlink, spaces in names, a directory that is not
+# writable - comes back exactly as it was saved, and identically to what the
+# single-process path produces.
+
+export TASKRUNNER_SAVE_REMOTE_CACHE=1
+
+mkdir a
+
+(
+  cd a
+  echo foo > input.txt
+  git init -q
+  git add input.txt
+  git commit -qm "Add input.txt"
+)
+
+cp -r a b
+cp -r a c
+
+go() {
+  # Note: we want separate workdir for separate repos
+  TASKRUNNER_STATE_DIRECTORY="$(pwd)" taskrunner -n mytask bash -e -c '
+    snapshot input.txt --outputs out
+    echo "Expensive computation"
+    mkdir -p out/nested/deep "out/dir with spaces" out/empty-dir
+    echo one > out/nested/deep/one.txt
+    echo two > "out/dir with spaces/file two.txt"
+    for i in 1 2 3 4 5; do echo "contents $i" > "out/nested/f$i.txt"; done
+    ln -s nested/deep/one.txt out/link
+    # Fixed modes and timestamps so the listing below does not depend on the
+    # umask or the clock. A read-only directory also has to be restorable.
+    chmod -R u=rwX,go=rX out
+    chmod 500 out/nested/deep
+    find out -exec touch -h -d "2001-02-03T04:05:06Z" {} +
+  '
+}
+
+describe() {
+  find out -printf "%y %m %T@ %P\n" | LC_ALL=C sort
+  find out -type l -printf "  symlink %P -> %l\n"
+  find out -type f | LC_ALL=C sort | while read -r f; do printf "  %s = " "$f"; cat "$f"; done
+}
+
+(
+  cd a
+  go
+  echo "--- saved from a:"
+  describe
+)
+
+(
+  echo "*** restoring in b with 4 unpack workers"
+  cd b
+  export TASKRUNNER_SAVE_REMOTE_CACHE=0 TASKRUNNER_UNPACK_WORKERS=4
+  go
+  describe
+)
+
+(
+  echo "*** restoring in c with 1 unpack worker, i.e. the single-process path"
+  cd c
+  export TASKRUNNER_SAVE_REMOTE_CACHE=0 TASKRUNNER_UNPACK_WORKERS=1
+  go
+  describe
+)

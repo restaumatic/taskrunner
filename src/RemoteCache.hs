@@ -36,6 +36,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
 import Amazonka.S3.PutObject (newPutObject, PutObject(..))
 import GHC.Clock (getMonotonicTime)
+import ParallelUnpack (unpackTarParallel)
 
 
 packTar :: MonadResource m => AppState -> Handle -> FilePath -> [FilePath] -> ConduitT () BS.ByteString m ()
@@ -58,6 +59,29 @@ packTar appState stderrHandle workdir files = do
        _ ->
          error "unable to obtain stdout pipe"
 
+-- | Unpack a compressed archive into @workdir@.
+--
+-- With more than one unpack worker the stream is decompressed here and split
+-- across concurrent tar processes, which is much faster for the many-small-files
+-- trees that caches usually hold. The archive format is the same either way, so
+-- this reads bundles saved by any version.
+--
+-- Decompressing here also means a tap can go between zstd and tar, which is what
+-- lets 'restoreCache' tell decompression apart from the file writes. The
+-- single-process path cannot: there zstd runs inside tar.
+unpack
+  :: MonadResource m
+  => AppState -> Handle -> FilePath
+  -> IORef TransferStats -- ^ Tap on the decompressed stream, parallel path only
+  -> ConduitT BS.ByteString Void m ()
+unpack appState stderrHandle workdir decompressedStatsRef
+  | appState.settings.unpackWorkers > 1 =
+      Zstd.decompress
+        .| measureTransfer decompressedStatsRef
+        .| unpackTarParallel appState stderrHandle workdir appState.settings.unpackWorkers
+  | otherwise =
+      unpackTar appState stderrHandle workdir
+
 unpackTar :: MonadResource m => AppState -> Handle -> FilePath -> ConduitT BS.ByteString Void m ()
 unpackTar appState stderrHandle workdir = do
   let cmd = "tar"
@@ -72,10 +96,16 @@ unpackTar appState stderrHandle workdir = do
      ) cleanupProcess \case
        (Just stdinPipe, _, _, process) -> do
          sinkHandle stdinPipe
-         hClose stdinPipe
-         exitCode <- liftIO $ waitForProcess process
-         when (exitCode /= ExitSuccess) do
-           liftIO $ bail $ "tar unpack command failed with code: " <> show exitCode
+         -- tar is still extracting after we hand over the last byte, and that
+         -- tail is outside the pipeline's own accounting, so report it too.
+         -- Otherwise the figures visibly fail to add up to the elapsed time.
+         (_, drainSeconds) <- timed do
+           hClose stdinPipe
+           exitCode <- liftIO $ waitForProcess process
+           when (exitCode /= ExitSuccess) do
+             liftIO $ bail $ "tar unpack command failed with code: " <> show exitCode
+         liftIO $ logDebug appState $ "tar drained in " <> formatSeconds drainSeconds
+           <> " after the last byte"
        _ ->
          error "unable to obtain stdin pipe"
 
@@ -261,6 +291,7 @@ restoreCache appState settings cacheRoot archiveName logMode = do
 
   handling _NoSuchKey onNoSuchKey $ withStderrPipe appState \stderrHandle -> do
     statsRef <- newIORef emptyTransferStats
+    decompressedStatsRef <- newIORef emptyTransferStats
 
     (_, elapsed) <- timed $ runConduitRes do
       response <- AWS.send env $ newGetObject (BucketName bucket) (ObjectKey objectKey)
@@ -268,17 +299,28 @@ restoreCache appState settings cacheRoot archiveName logMode = do
         liftIO $ logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
       response.body.body
             .| measureTransfer statsRef
-            .| unpackTar appState stderrHandle cacheRoot
+            .| unpack appState stderrHandle cacheRoot decompressedStatsRef
 
     stats <- readIORef statsRef
-    -- The size is that of the compressed archive. Only a two-way split is
-    -- available here: zstd runs inside tar, so decompression cannot be
-    -- distinguished from the file writes. Note the download side excludes
-    -- connection setup, which happened above in AWS.send, and see
+    decompressedStats <- readIORef decompressedStatsRef
+    -- The size is that of the compressed archive. As on the save path the taps
+    -- nest rather than partition, so decompression is the difference between
+    -- them; the figures then add up to the elapsed time. Note the download side
+    -- excludes connection setup, which happened above in AWS.send, and see
     -- 'measureTransfer' for why it is a lower bound.
+    let downloadSeconds = stats.producingSeconds
+        unpackAttribution
+          -- The single-process path has no tap between zstd and tar, so the two
+          -- cannot be told apart there.
+          | appState.settings.unpackWorkers > 1 =
+              ", on decompression "
+                <> formatSeconds (max 0 (decompressedStats.producingSeconds - downloadSeconds))
+                <> ", on unpacking " <> formatSeconds decompressedStats.consumingSeconds
+          | otherwise =
+              ", on decompression and unpacking " <> formatSeconds stats.consumingSeconds
     logDebug appState $ "Downloaded and unpacked " <> transferSummary stats.bytes elapsed
-      <> " - blocked on download " <> formatSeconds stats.producingSeconds
-      <> ", on decompression and unpacking " <> formatSeconds stats.consumingSeconds
+      <> " - blocked on download " <> formatSeconds downloadSeconds
+      <> unpackAttribution
 
     pure True
 

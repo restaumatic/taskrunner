@@ -5,7 +5,7 @@ cabal-version: 2.2
 -- see: https://github.com/sol/hpack
 
 name:           taskrunner
-version:        0.18.0.11
+version:        0.18.0.14
 description:    Please see the README on GitHub at <https://github.com/githubuser/taskrunner#readme>
 homepage:       https://github.com/githubuser/taskrunner#readme
 bug-reports:    https://github.com/githubuser/taskrunner/issues
@@ -29,6 +29,7 @@ library
       CliArgs
       CommitStatus
       Control.Monad.EarlyReturn
+      ParallelUnpack
       RemoteCache
       SnapshotCliArgs
       Trace

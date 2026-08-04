@@ -30,6 +30,7 @@ import SnapshotCliArgs qualified
 import Data.Text qualified as Text
 import qualified Data.Text.IO as Text
 import GHC.IO.Exception (ExitCode(..))
+import GHC.Conc (getNumProcessors)
 import Crypto.Hash qualified as H
 import Data.Containers.ListUtils (nubOrdOn)
 import Prelude (read)
@@ -63,6 +64,11 @@ getSettings = do
   mainBranch <- map toText <$> lookupEnv "TASKRUNNER_MAIN_BRANCH"
   quietMode <- (==Just "1") <$> lookupEnv "TASKRUNNER_QUIET"
   githubTokenRefreshThresholdSeconds <- maybe 300 read <$> lookupEnv "TASKRUNNER_GITHUB_TOKEN_REFRESH_THRESHOLD_SECONDS"
+  -- Unpacking a cache bundle is bound by per-file filesystem latency rather
+  -- than by CPU, so several tar processes help even on a machine with few
+  -- cores. 1 disables the parallel path entirely.
+  defaultUnpackWorkers <- max 4 . min 8 <$> getNumProcessors
+  unpackWorkers <- maybe defaultUnpackWorkers read <$> lookupEnv "TASKRUNNER_UNPACK_WORKERS"
   pure Settings
         { stateDirectory
         , rootDirectory
@@ -81,6 +87,7 @@ getSettings = do
         , githubTokenRefreshThresholdSeconds
         , trace = False
         , traceFiles = False
+        , unpackWorkers
         }
 
 main :: IO ()

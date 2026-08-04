@@ -1,0 +1,74 @@
+-- output:
+[mytask] info | Inputs changed, running task
+[mytask] stdout | Expensive computation
+[mytask] info | success
+--- saved from a:
+d 500 981173106.0000000000 nested/deep
+d 755 981173106.0000000000 
+d 755 981173106.0000000000 dir with spaces
+d 755 981173106.0000000000 empty-dir
+d 755 981173106.0000000000 nested
+f 644 981173106.0000000000 dir with spaces/file two.txt
+f 644 981173106.0000000000 nested/deep/one.txt
+f 644 981173106.0000000000 nested/f1.txt
+f 644 981173106.0000000000 nested/f2.txt
+f 644 981173106.0000000000 nested/f3.txt
+f 644 981173106.0000000000 nested/f4.txt
+f 644 981173106.0000000000 nested/f5.txt
+l 777 981173106.0000000000 link
+  symlink link -> nested/deep/one.txt
+  out/dir with spaces/file two.txt = two
+  out/nested/deep/one.txt = one
+  out/nested/f1.txt = contents 1
+  out/nested/f2.txt = contents 2
+  out/nested/f3.txt = contents 3
+  out/nested/f4.txt = contents 4
+  out/nested/f5.txt = contents 5
+*** restoring in b with 4 unpack workers
+[mytask] info | Found remote cache mytask-6b36308659163b577fd1c832107dc46ca3aa659b.tar.zst, restoring
+[mytask] info | Restored from remote cache
+d 500 981173106.0000000000 nested/deep
+d 755 981173106.0000000000 
+d 755 981173106.0000000000 dir with spaces
+d 755 981173106.0000000000 empty-dir
+d 755 981173106.0000000000 nested
+f 644 981173106.0000000000 dir with spaces/file two.txt
+f 644 981173106.0000000000 nested/deep/one.txt
+f 644 981173106.0000000000 nested/f1.txt
+f 644 981173106.0000000000 nested/f2.txt
+f 644 981173106.0000000000 nested/f3.txt
+f 644 981173106.0000000000 nested/f4.txt
+f 644 981173106.0000000000 nested/f5.txt
+l 777 981173106.0000000000 link
+  symlink link -> nested/deep/one.txt
+  out/dir with spaces/file two.txt = two
+  out/nested/deep/one.txt = one
+  out/nested/f1.txt = contents 1
+  out/nested/f2.txt = contents 2
+  out/nested/f3.txt = contents 3
+  out/nested/f4.txt = contents 4
+  out/nested/f5.txt = contents 5
+*** restoring in c with 1 unpack worker, i.e. the single-process path
+[mytask] info | Found remote cache mytask-6b36308659163b577fd1c832107dc46ca3aa659b.tar.zst, restoring
+[mytask] info | Restored from remote cache
+d 500 981173106.0000000000 nested/deep
+d 755 981173106.0000000000 
+d 755 981173106.0000000000 dir with spaces
+d 755 981173106.0000000000 empty-dir
+d 755 981173106.0000000000 nested
+f 644 981173106.0000000000 dir with spaces/file two.txt
+f 644 981173106.0000000000 nested/deep/one.txt
+f 644 981173106.0000000000 nested/f1.txt
+f 644 981173106.0000000000 nested/f2.txt
+f 644 981173106.0000000000 nested/f3.txt
+f 644 981173106.0000000000 nested/f4.txt
+f 644 981173106.0000000000 nested/f5.txt
+l 777 981173106.0000000000 link
+  symlink link -> nested/deep/one.txt
+  out/dir with spaces/file two.txt = two
+  out/nested/deep/one.txt = one
+  out/nested/f1.txt = contents 1
+  out/nested/f2.txt = contents 2
+  out/nested/f3.txt = contents 3
+  out/nested/f4.txt = contents 4
+  out/nested/f5.txt = contents 5

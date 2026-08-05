@@ -1,0 +1,7 @@
+# quiet
+# Regression test: the quiet buffer used to be flushed before the output stream
+# handlers had drained the child's pipes, so a failing task could report no output at
+# all. A single line usually got through by luck; enough lines to fill a pipe buffer
+# makes the race deterministic.
+seq 1 5000 | sed 's/^/line /'
+exit 1

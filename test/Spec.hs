@@ -159,7 +159,11 @@ runTest fakeGithubServer source = do
             } \_ _ _ processHandle -> do
 
         output <- LBS.hGetContents pipeRead
-        -- FIXME: we can probably get a deadlock if the pipe is filled (since we're not reading from it yet)
+        -- Drain before reaping. hGetContents is lazy, so leaving this unevaluated until
+        -- after waitForProcess deadlocks as soon as the task writes more than the pipe
+        -- buffer holds (~64 KiB). std_out/std_err were passed as UseHandle, which closes
+        -- our copy of the write end, so the read terminates at EOF when the task exits.
+        _ <- evaluateWHNF (LBS.length output)
 
         exitCode <- waitForProcess processHandle
 

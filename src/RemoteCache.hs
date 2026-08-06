@@ -26,7 +26,7 @@ import Network.URI (parseURI, URI (..), URIAuth(..))
 import System.Directory (makeAbsolute, canonicalizePath)
 import System.FilePath (makeRelative)
 import qualified System.FilePath as FP
-import Utils (bail, logDebug, logFileName, logInfo, withStderrPipe)
+import Utils (bail, bytesfmt, formatSeconds, logDebug, logFileName, logInfo, timed, transferSummary, withStderrPipe)
 import qualified Amazonka as AWS
 import Control.Exception.Lens (handling)
 import System.Exit (ExitCode(..))
@@ -35,6 +35,7 @@ import qualified Data.Conduit.Text as CT
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
 import Amazonka.S3.PutObject (newPutObject, PutObject(..))
+import GHC.Clock (getMonotonicTime)
 
 
 packTar :: MonadResource m => AppState -> Handle -> FilePath -> [FilePath] -> ConduitT () BS.ByteString m ()
@@ -114,7 +115,6 @@ parseEndpoint s = do
     . (\svc -> svc { s3AddressingStyle = S3AddressingStylePath })
 
 -- TODO:
--- - report speed, size etc.
 -- - integrate amazonka logging
 -- - handle errors
 saveCache
@@ -145,13 +145,20 @@ saveCache appState settings relativeCacheRoot files archiveName = do
 
     logDebug appState $ "Uploading to s3://" <> bucket <> "/" <> objectKey
 
-    withStderrPipe appState \stderrHandle ->
+    -- Taps either side of zstd, so a slow save can be pinned on reading the
+    -- files, on compressing them, or on the network.
+    packStatsRef <- newIORef emptyTransferStats
+    uploadStatsRef <- newIORef emptyTransferStats
+
+    (_, elapsed) <- timed $ withStderrPipe appState \stderrHandle ->
       runConduitRes do
         let multipartUpload = (newCreateMultipartUpload (BucketName bucket) (ObjectKey objectKey) :: CreateMultipartUpload)
               { storageClass = Just StorageClass_REDUCED_REDUNDANCY }
         result <-
           packTar appState stderrHandle cacheRoot filesRelativeToCacheRoot
+          .| measureTransfer packStatsRef
           .| Zstd.compress 3
+          .| measureTransfer uploadStatsRef
           .| streamUpload env Nothing multipartUpload
         case result of
           Left (_, err) ->
@@ -159,6 +166,64 @@ saveCache appState settings relativeCacheRoot files archiveName = do
           Right _ -> do
             liftIO $ logDebug appState "Upload success"
             pure ()
+
+    packStats <- readIORef packStatsRef
+    uploadStats <- readIORef uploadStatsRef
+    -- The taps nest rather than partition, so the downstream one's wait already
+    -- contains the upstream one's; subtracting isolates compression and the three
+    -- then sum to the elapsed time.
+    let readingSeconds = packStats.producingSeconds
+        compressionSeconds = max 0 (uploadStats.producingSeconds - packStats.producingSeconds)
+        uploadSeconds = uploadStats.consumingSeconds
+    logDebug appState $ "Packed and uploaded " <> transferSummary uploadStats.bytes elapsed
+      <> ", compressed from " <> toText (bytesfmt "%.2f" packStats.bytes)
+      <> " - blocked on reading files " <> formatSeconds readingSeconds
+      <> ", on compression " <> formatSeconds compressionSeconds
+      <> ", on upload " <> formatSeconds uploadSeconds
+
+-- | Bytes seen, and how the wall clock divided between producing them and
+-- consuming them.
+data TransferStats = TransferStats
+  { bytes :: !Int
+  , producingSeconds :: !Double
+  , consumingSeconds :: !Double
+  }
+
+emptyTransferStats :: TransferStats
+emptyTransferStats = TransferStats
+  { bytes = 0
+  , producingSeconds = 0
+  , consumingSeconds = 0
+  }
+
+-- | Pass data through unchanged, recording how long the pipeline sat blocked on
+-- upstream versus on downstream. Conduit alternates the two strictly, so together
+-- they cover the whole wall clock.
+--
+-- These are stall times, not transfer times: a socket write returns once the data
+-- is in the kernel's send buffer, so I/O overlaps the rest of the pipeline and is
+-- undercounted. They answer "where did the pipeline stall", not "how long were the
+-- bytes in transit".
+measureTransfer :: MonadIO m => IORef TransferStats -> ConduitT BS.ByteString BS.ByteString m ()
+measureTransfer ref = loop
+  where
+  loop = do
+    beforeAwait <- liftIO getMonotonicTime
+    m_chunk <- C.await
+    afterAwait <- liftIO getMonotonicTime
+    case m_chunk of
+      Nothing ->
+        liftIO $ modifyIORef' ref \stats -> stats
+          { producingSeconds = stats.producingSeconds + (afterAwait - beforeAwait) }
+      Just chunk -> do
+        C.yield chunk
+        afterYield <- liftIO getMonotonicTime
+        liftIO $ modifyIORef' ref \stats -> stats
+          { bytes = stats.bytes + BS.length chunk
+          , producingSeconds = stats.producingSeconds + (afterAwait - beforeAwait)
+          , consumingSeconds = stats.consumingSeconds + (afterYield - afterAwait)
+          }
+        loop
 
 data LogMode = NoLog | Log deriving (Eq, Show)
 
@@ -181,14 +246,25 @@ restoreCache appState settings cacheRoot archiveName logMode = do
       logDebug appState $ "Remote cache archive not found s3://" <> bucket <> "/" <> objectKey
       pure False
 
-  handling _NoSuchKey onNoSuchKey $ withStderrPipe appState \stderrHandle ->
-    runConduitRes do
+  handling _NoSuchKey onNoSuchKey $ withStderrPipe appState \stderrHandle -> do
+    statsRef <- newIORef emptyTransferStats
+
+    (_, elapsed) <- timed $ runConduitRes do
       response <- AWS.send env $ newGetObject (BucketName bucket) (ObjectKey objectKey)
       when (logMode == Log) do
         liftIO $ logInfo appState $ "Found remote cache " <> archiveName <> ", restoring"
       response.body.body
+            .| measureTransfer statsRef
             .| unpackTar appState stderrHandle cacheRoot
-      pure True
+
+    stats <- readIORef statsRef
+    -- Size is of the compressed archive, and the split is only two-way because zstd
+    -- runs inside tar. Download excludes connection setup, done above in AWS.send.
+    logDebug appState $ "Downloaded and unpacked " <> transferSummary stats.bytes elapsed
+      <> " - blocked on download " <> formatSeconds stats.producingSeconds
+      <> ", on decompression and unpacking " <> formatSeconds stats.consumingSeconds
+
+    pure True
 
 getLatestBuildHash
   :: AppState

@@ -17,6 +17,7 @@ import GHC.IO.Handle (hIsClosed)
 import System.FilePath ((</>))
 import Control.Concurrent.Async (async, wait)
 import System.Timeout (timeout)
+import GHC.Clock (getMonotonicTime)
 
 outputLine :: AppState -> Handle -> ByteString -> ByteString -> IO ()
 outputLine appState toplevelOutput streamName line = do
@@ -90,6 +91,34 @@ bytesfmt formatter bs = printf (formatter <> " %s")
   bytesSuffixes :: [String]
   bytesSuffixes = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
   bytesSuffix = bytesSuffixes !! i
+
+-- | Run an action, also returning how long it took, in seconds.
+timed :: MonadIO m => m a -> m (a, Double)
+timed action = do
+  start <- liftIO getMonotonicTime
+  result <- action
+  end <- liftIO getMonotonicTime
+  pure (result, end - start)
+
+-- | Format a duration in seconds, e.g. @"1.50s"@.
+formatSeconds :: Double -> Text
+formatSeconds seconds = toText (printf "%.2fs" seconds :: String)
+
+-- | Describe a transfer of @bytes@ bytes taking @seconds@ seconds.
+--
+-- >>> transferSummary 12345678 1.5
+-- "11.77 MiB in 1.50s (7.85 MiB/s)"
+transferSummary :: Int -> Double -> Text
+transferSummary bytes seconds =
+  toText (bytesfmt "%.2f" bytes) <> " in " <> formatSeconds seconds <> rate
+  where
+  rate
+    -- Below that the rate is mostly measurement noise, and dividing by a very
+    -- small elapsed time gives an absurd number.
+    | seconds >= 0.01 =
+        " (" <> toText (bytesfmt "%.2f" (round (fromIntegral bytes / seconds) :: Int)) <> "/s)"
+    | otherwise =
+        ""
 
 -- | Create a per-subprocess stderr pipe that prefixes output with the job name.
 -- The pipe is fully drained before returning.

@@ -42,8 +42,9 @@ outputLine appState toplevelOutput streamName line = do
       let formattedLine = timestampStr <> "[" <> jobName <> "] " <> streamName <> " | " <> line
       if appState.settings.quietMode
         then do
-          -- In quiet mode, add to buffer instead of outputting immediately
-          modifyIORef appState.quietBuffer (formattedLine :)
+          -- In quiet mode, add to buffer instead of outputting immediately. Atomic
+          -- because the stdout and stderr handlers append concurrently.
+          atomicModifyIORef' appState.quietBuffer \buffer -> (formattedLine : buffer, ())
         else
           -- Normal mode: output immediately
           B8.hPutStrLn toplevelOutput formattedLine

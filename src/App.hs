@@ -190,16 +190,18 @@ main = do
 
     skipped <- readIORef appState.skipped
 
+    -- Wait for output stream handlers to finish before logging status messages,
+    -- to ensure all subprocess output is flushed first. This has to happen before
+    -- the quiet buffer is touched: the handlers are what fill it, and the child
+    -- exiting does not mean they have drained its pipes yet.
+    timeoutStream appState "stdout" $ wait stdoutHandler
+    timeoutStream appState "stderr" $ wait stderrHandler
+
     -- Handle quiet mode buffer based on exit code
     when appState.settings.quietMode do
       if exitCode == ExitSuccess
         then discardQuietBuffer appState  -- Success: discard buffered output
         else flushQuietBuffer appState toplevelStderr  -- Failure: show buffered output
-
-    -- Wait for output stream handlers to finish before logging status messages,
-    -- to ensure all subprocess output is flushed first.
-    timeoutStream appState "stdout" $ wait stdoutHandler
-    timeoutStream appState "stderr" $ wait stderrHandler
 
     logDebug appState $ "Command " <> show (args.cmd : args.args) <> " exited with code " <> show exitCode
     logDebugParent m_parentRequestPipe $ "Subtask " <> toText jobName <> " finished with " <> show exitCode

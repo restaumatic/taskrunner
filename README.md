@@ -67,6 +67,7 @@ To use it, first build using another system, and the run `taskrunner` with `TASK
 
 - `TASKRUNNER_DEBUG` - whether to output debug messages to toplevel output. Note that debug messages are always written to per-task logs, regardless of this setting.
 - `TASKRUNNER_LOG_INFO` - whether to output "info" messages to toplevel output. They are minimal messages, produced only when there's actually something to be done (including fetching from cache).
+- `TASKRUNNER_GITHUB_RETRY_DELAY_MS` - first backoff delay when a GitHub API call fails with a connection error, 5xx or 429 (default: 1000). It doubles on each of the 4 retries. A commit status that still fails is logged as a warning and doesn't fail the task.
 - more...
 
 ## Possible features
@@ -179,6 +180,7 @@ Special comments in `.txt` files control test behavior:
 - `# no toplevel` - Don't wrap in taskrunner
 - `# s3` - Requires S3 credentials (auto-skipped if missing)
 - `# github keys` - Provide GitHub credentials
+- `# github failing status updates N` - Fake API rejects the next N commit status updates with 502
 - `# quiet` - Run in quiet mode
 
 ### S3 Test Auto-Detection

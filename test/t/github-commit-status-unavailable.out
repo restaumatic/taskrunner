@@ -1,0 +1,25 @@
+-- output:
+[mytask] warn | CommitStatus: updating commit status failed (HTTP 502), retrying in 1ms
+[mytask] warn | CommitStatus: updating commit status failed (HTTP 502), retrying in 2ms
+[mytask] warn | CommitStatus: updating commit status failed (HTTP 502), retrying in 4ms
+[mytask] warn | CommitStatus: updating commit status failed (HTTP 502), retrying in 8ms
+[mytask] warn | CommitStatus: Failed to update commit status mytask to pending: HTTP 502: Bad Gateway
+[mytask] stdout | Success
+[mytask] warn | CommitStatus: updating commit status failed (HTTP 502), retrying in 1ms
+[mytask] warn | CommitStatus: updating commit status failed (HTTP 502), retrying in 2ms
+[mytask] warn | CommitStatus: updating commit status failed (HTTP 502), retrying in 4ms
+[mytask] warn | CommitStatus: updating commit status failed (HTTP 502), retrying in 8ms
+[mytask] warn | CommitStatus: Failed to update commit status mytask to success: HTTP 502: Bad Gateway
+exit code: 0
+-- github:
+Requested access token for installation 123
+Rejected commit status update with 502
+Rejected commit status update with 502
+Rejected commit status update with 502
+Rejected commit status update with 502
+Rejected commit status update with 502
+Rejected commit status update with 502
+Rejected commit status update with 502
+Rejected commit status update with 502
+Rejected commit status update with 502
+Rejected commit status update with 502

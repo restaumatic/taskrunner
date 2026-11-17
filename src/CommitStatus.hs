@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 
 module CommitStatus where
 
@@ -21,6 +22,8 @@ import qualified Data.ByteString.Lazy as BL
 import System.FileLock (withFileLock, SharedExclusive(..))
 import System.Directory (doesFileExist)
 import Utils (getCurrentCommit, logError, logDebug, logWarn)
+import qualified Control.Exception as E
+import Control.Concurrent (threadDelay)
 import Types (AppState(..), GithubClient(..), Settings(..))
 
 -- Define the data types for the status update
@@ -132,18 +135,54 @@ forceRefreshClient appState = do
   writeIORef appState.githubClient (Just client)
   pure client
 
+type GithubResult = Either HTTP.HttpException (HTTP.Response BL.ByteString)
+
 -- Execute a GitHub API request, retrying once with a fresh token on 401
-withFreshClient :: AppState -> (GithubClient -> IO (HTTP.Response BL.ByteString)) -> IO (HTTP.Response BL.ByteString)
-withFreshClient appState doRequest = do
+withFreshClient :: AppState -> Text -> (GithubClient -> IO (HTTP.Response BL.ByteString)) -> IO GithubResult
+withFreshClient appState what doRequest = do
   client <- getClient appState
-  response <- doRequest client
-  if response.responseStatus.statusCode == 401
-    then do
+  result <- withRetry appState what (doRequest client)
+  case result of
+    Right response | response.responseStatus.statusCode == 401 -> do
       logWarn appState "GitHub API returned 401, force-refreshing token and retrying..."
       freshClient <- forceRefreshClient appState
-      doRequest freshClient
-    else
-      pure response
+      withRetry appState what (doRequest freshClient)
+    _ ->
+      pure result
+
+-- Retries connection errors, 5xx and 429 with exponential backoff.
+withRetry :: AppState -> Text -> IO (HTTP.Response BL.ByteString) -> IO GithubResult
+withRetry appState what doRequest = go 0
+  where
+    maxRetries = 4 :: Int
+    go attempt = do
+      result <- E.try doRequest
+      case retryReason result of
+        Just reason | attempt < maxRetries -> do
+          let delayMs = appState.settings.githubRetryDelayMs * 2 ^ attempt
+          logWarn appState $ "CommitStatus: " <> what <> " failed (" <> reason <> "), retrying in " <> show delayMs <> "ms"
+          threadDelay (delayMs * 1000)
+          go (attempt + 1)
+        _ ->
+          pure result
+
+    retryReason :: GithubResult -> Maybe Text
+    retryReason = \case
+      Left err -> Just (describeHttpException err)
+      Right response
+        | code >= 500 || code == 429 -> Just ("HTTP " <> show code)
+        | otherwise -> Nothing
+        where code = response.responseStatus.statusCode
+
+describeHttpException :: HTTP.HttpException -> Text
+describeHttpException = \case
+  HTTP.HttpExceptionRequest _ content -> show content
+  HTTP.InvalidUrlException url reason -> "invalid URL " <> toText url <> ": " <> toText reason
+
+describeResult :: GithubResult -> Text
+describeResult = \case
+  Left err -> describeHttpException err
+  Right response -> "HTTP " <> show response.responseStatus.statusCode <> ": " <> decodeUtf8 response.responseBody
 
 -- Create new token and write to cache (caller should hold EXCLUSIVE lock)
 refreshToken :: AppState -> FilePath -> IO GithubClient
@@ -223,7 +262,11 @@ createTokenFromGitHub appState = do
                     , ("User-Agent", "restaumatic-bot")
                     ]
                 }
-  response <- HTTP.httpLbs request manager
+  response <- withRetry appState "creating installation token" (HTTP.httpLbs request manager) >>= \case
+    Right response -> pure response
+    Left err -> do
+      logError appState $ "CommitStatus: Failed to create installation token: " <> describeHttpException err
+      exitFailure
   let mTokenResponse = eitherDecode @InstallationTokenResponse (HTTP.responseBody response)
   case mTokenResponse of
     Left err -> do
@@ -238,7 +281,7 @@ updateCommitStatus :: MonadIO m => AppState -> StatusRequest -> m ()
 updateCommitStatus appState statusRequest = liftIO do
   sha <- getCurrentCommit appState
 
-  statusResponse <- withFreshClient appState \client -> do
+  result <- withFreshClient appState "updating commit status" \client -> do
     let statusUrl = toString client.apiUrl <> "/repos/" ++ toString client.owner ++ "/" ++ toString client.repo ++ "/statuses/" ++ toString sha
     initStatusRequest <- HTTP.parseRequest statusUrl
     let statusReq = initStatusRequest
@@ -253,20 +296,19 @@ updateCommitStatus appState statusRequest = liftIO do
                     }
     HTTP.httpLbs statusReq client.manager
 
-  if statusResponse.responseStatus.statusCode == 201
-    then
+  -- A status GitHub didn't record shouldn't fail a task that already ran.
+  case result of
+    Right response | response.responseStatus.statusCode == 201 ->
       logDebug appState "Commit status updated successfully"
-    else do
-      logError appState $ "CommitStatus: Failed to update commit status: " <> show statusResponse
-      logError appState $ "CommitStatus: Response: " <> decodeUtf8 statusResponse.responseBody
-      exitFailure
+    _ ->
+      logWarn appState $ "CommitStatus: Failed to update commit status " <> statusRequest.context <> " to " <> statusRequest.state <> ": " <> describeResult result
 
 -- Check if a status exists for the current commit and context
 checkExistingStatus :: MonadIO m => AppState -> T.Text -> m Bool
 checkExistingStatus appState contextName = liftIO do
   sha <- getCurrentCommit appState
 
-  statusResponse <- withFreshClient appState \client -> do
+  result <- withFreshClient appState "reading commit statuses" \client -> do
     let statusUrl = toString client.apiUrl <> "/repos/" ++ toString client.owner ++ "/" ++ toString client.repo ++ "/commits/" ++ toString sha ++ "/statuses"
     initStatusRequest <- HTTP.parseRequest statusUrl
     let statusReq = initStatusRequest
@@ -279,8 +321,8 @@ checkExistingStatus appState contextName = liftIO do
                     }
     HTTP.httpLbs statusReq client.manager
 
-  if statusResponse.responseStatus.statusCode == 200
-    then do
+  case result of
+    Right statusResponse | statusResponse.responseStatus.statusCode == 200 -> do
       let mStatuses = eitherDecode @[StatusResponse] (HTTP.responseBody statusResponse)
       case mStatuses of
         Left err -> do
@@ -290,6 +332,6 @@ checkExistingStatus appState contextName = liftIO do
           let hasContext = any (\s -> s.context == contextName) statuses
           logDebug appState $ "CommitStatus: Found existing status for context " <> contextName <> ": " <> show hasContext
           pure hasContext
-    else do
-      logDebug appState $ "CommitStatus: Failed to get commit statuses: " <> show statusResponse.responseStatus.statusCode
+    _ -> do
+      logDebug appState $ "CommitStatus: Failed to get commit statuses: " <> describeResult result
       pure False

@@ -26,7 +26,8 @@ jobs:
           -e RUSTFS_SECRET_KEY=testadmin \
           rustfs/rustfs:latest
 
-        curl -s -D- --retry 15 --retry-delay 1 --retry-connrefused http://localhost:9000
+        curl -s -D- --retry 30 --retry-delay 1 --retry-all-errors http://localhost:9000 \
+          || { docker logs rustfs; exit 1; }
 
     - uses: actions/checkout@v4
     - uses: haskell-actions/setup@v2

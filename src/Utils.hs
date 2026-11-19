@@ -10,7 +10,8 @@ import System.IO.Error (isEOFError, IOError)
 import Text.Printf (printf)
 import Prelude (until)
 import Data.List ((!!))
-import System.Process (CreateProcess(..), StdStream (..), readCreateProcess, createPipe)
+import System.Exit (ExitCode (..))
+import System.Process (CreateProcess(..), StdStream (..), readCreateProcess, readCreateProcessWithExitCode, createProcess, waitForProcess, createPipe)
 import Data.Conduit.Process (proc)
 import qualified Data.Text as Text
 import GHC.IO.Handle (hIsClosed)
@@ -131,17 +132,35 @@ withStderrPipe appState action = do
     timeoutStream appState "stderr" $ wait handler
   pure result
 
+-- | Whether tracked files at the paths differ from HEAD.
+--
+-- Compares content (through clean filters) rather than trusting index stat data:
+-- `git status` reports a file whose size differs from the index entry as modified
+-- without reading it, so a git-lfs pointer replaced by its object (e.g. by a
+-- concurrent `git lfs pull`) looks dirty until the index is refreshed.
 isDirtyAtPaths :: AppState -> [FilePath] -> IO Bool
 isDirtyAtPaths _ [] = pure False
-isDirtyAtPaths appState paths =
-  withStderrPipe appState \stderr_ -> do
-    output <-
-      readCreateProcess
-        (proc "git" (["status", "--porcelain", "--untracked-files=no", "--"] ++ paths))
-          { std_err = UseHandle stderr_
-          }
-        ""
-    pure $ not (null output)
+isDirtyAtPaths appState paths = do
+  (headCode, _, _) <- readCreateProcessWithExitCode (proc "git" ["rev-parse", "--verify", "--quiet", "HEAD"]) ""
+  if headCode == ExitSuccess then do
+    exitCode <- withStderrPipe appState \stderr_ -> do
+      (_, _, _, processHandle) <-
+        createProcess (proc "git" (["diff", "--quiet", "HEAD", "--"] ++ paths)) { std_err = UseHandle stderr_ }
+      waitForProcess processHandle
+    case exitCode of
+      ExitSuccess -> pure False
+      ExitFailure 1 -> pure True
+      ExitFailure n -> bail $ "git diff exited with code " <> show n
+  else
+    -- No commits yet, so nothing to diff against.
+    withStderrPipe appState \stderr_ -> do
+      output <-
+        readCreateProcess
+          (proc "git" (["status", "--porcelain", "--untracked-files=no", "--"] ++ paths))
+            { std_err = UseHandle stderr_
+            }
+          ""
+      pure $ not (null output)
 
 getCurrentBranch :: AppState -> IO Text
 getCurrentBranch appState =

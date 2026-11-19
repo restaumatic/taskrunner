@@ -1,0 +1,44 @@
+# no toplevel
+# s3
+
+# Like git-lfs replacing a pointer with its object: the working tree file differs in size from
+# the index entry but cleans to the committed blob, so the remote cache still applies.
+
+export TASKRUNNER_SAVE_REMOTE_CACHE=1
+
+mkdir a
+
+(
+  cd a
+  git init -q
+  git config filter.pointer.clean "head -n1"
+  echo "input.txt filter=pointer" > .gitattributes
+  echo foo > input.txt
+  git add .gitattributes input.txt
+  git commit -qm "Add input.txt"
+)
+
+cp -r a b
+
+go() {
+  # Note: we want separate workdir for separate repos
+  TASKRUNNER_STATE_DIRECTORY="$(pwd)" taskrunner -n mytask bash -e -c '
+    snapshot input.txt --outputs output.txt
+    echo "Expensive computation"
+    rev input.txt > output.txt
+  '
+}
+
+(
+  cd a
+  go
+  echo "Output in a is: $(cat output.txt)"
+)
+
+(
+  cd b
+  printf 'foo\nobject content\n' > input.txt
+  echo "Status in b: $(git status --porcelain --untracked-files=no)"
+  go
+  echo "Output in b is: $(cat output.txt)"
+)

@@ -109,6 +109,8 @@ runTest fakeGithubServer source = do
     whenJust options.githubTokenExpirationOffset $ \offset ->
       FakeGithubApi.setTokenExpirationOffset fakeGithubServer offset
 
+    FakeGithubApi.setFailingStatusPosts fakeGithubServer options.githubFailingStatusPosts
+
     (pipeRead, pipeWrite) <- createPipe
     path <- getEnv "PATH"
 
@@ -135,6 +137,7 @@ runTest fakeGithubServer source = do
               , ("TASKRUNNER_DISABLE_TIMESTAMPS", "1")
               , ("TASKRUNNER_OUTPUT_STREAM_TIMEOUT", "1")
               , ("TASKRUNNER_LOG_INFO", "1")
+              , ("TASKRUNNER_GITHUB_RETRY_DELAY_MS", "1")
               -- For creating Git commits
               , ("GIT_AUTHOR_NAME", "test")
               , ("GIT_AUTHOR_EMAIL", "test@example.com")
@@ -199,6 +202,7 @@ data Options = Options
   , quiet :: Bool
   , githubTokenLifetime :: Maybe Int
   , githubTokenExpirationOffset :: Maybe Int
+  , githubFailingStatusPosts :: Int
   }
 
 instance Default Options where
@@ -211,6 +215,7 @@ instance Default Options where
     , quiet = False
     , githubTokenLifetime = Nothing
     , githubTokenExpirationOffset = Nothing
+    , githubFailingStatusPosts = 0
     }
 
 getOptions :: Text -> Options
@@ -238,6 +243,9 @@ getOptions source = flip execState def $ go (lines source)
         go rest
       ["#", "github", "token", "expiration", "offset", n] -> do
         modify (\s -> s { githubTokenExpirationOffset = readMaybe (toString n) })
+        go rest
+      ["#", "github", "failing", "status", "updates", n] -> do
+        modify (\s -> s { githubFailingStatusPosts = fromMaybe 0 (readMaybe (toString n)) })
         go rest
       ["#", "quiet"] -> do
         modify (\s -> (s :: Options) { quiet = True })

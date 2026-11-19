@@ -1,13 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecursiveDo #-}
 
-module FakeGithubApi (Server, start, stop, clearOutput, getOutput, setTokenLifetime, setTokenExpirationOffset) where
+module FakeGithubApi (Server, start, stop, clearOutput, getOutput, setTokenLifetime, setTokenExpirationOffset, setFailingStatusPosts) where
 
 import Universum
 
 import Network.Wai
 import qualified Network.Wai.Handler.Warp as Warp
-import Network.HTTP.Types (status200, status201, status400, status401, status404, methodPost, methodGet)
+import Network.HTTP.Types (status200, status201, status400, status401, status404, status502, methodPost, methodGet)
 import Data.Aeson (encode, object, (.=), Value)
 import qualified Data.Aeson as Aeson
 import qualified Data.Map.Strict as Map
@@ -89,12 +89,17 @@ handleCommitStatusRequest server owner repo commitSha req respond =
             Just rejection -> respond rejection
             Nothing -> do
               body <- strictRequestBody req
-              -- Store the status for later retrieval
-              storeStatus server commitSha body
-              -- Note: commit SHA omitted because it's nondeterministic
-              addOutput server $ "Updated commit status for " <> owner <> "/" <> repo <> " to " <> decodeUtf8 body
-              respond $ responseLBS status201 [("Content-Type", "application/json")]
-                (encode $ object ["state" .= ("success" :: Text), "sha" .= commitSha, "repository" .= repo, "owner" .= owner])
+              failing <- atomicModifyIORef server.failingStatusPosts (\n -> (max 0 (n - 1), n > 0))
+              if failing then do
+                addOutput server "Rejected commit status update with 502"
+                respond $ responseLBS status502 [] "Bad Gateway"
+              else do
+                -- Store the status for later retrieval
+                storeStatus server commitSha body
+                -- Note: commit SHA omitted because it's nondeterministic
+                addOutput server $ "Updated commit status for " <> owner <> "/" <> repo <> " to " <> decodeUtf8 body
+                respond $ responseLBS status201 [("Content-Type", "application/json")]
+                  (encode $ object ["state" .= ("success" :: Text), "sha" .= commitSha, "repository" .= repo, "owner" .= owner])
         else respond $ responseLBS status400 [] "Bad Request"
 
 handleGetCommitStatuses :: Server -> Text -> Text -> Text -> Request -> (Response -> IO ResponseReceived) -> IO ResponseReceived
@@ -117,6 +122,7 @@ data Server = Server
   , tokenCounter :: IORef Int
   , validTokens :: IORef (Map Text UTCTime)  -- Map from token to actual expiry time
   , tokenExpirationOffset :: IORef Int  -- Seconds to add to reported expires_at (simulates clock skew)
+  , failingStatusPosts :: IORef Int  -- Number of upcoming status updates to reject with 502
   }
 
 start :: Int -> IO Server
@@ -128,9 +134,10 @@ start port = do
   tokenCounter <- newIORef 0
   validTokens <- newIORef Map.empty
   tokenExpirationOffset <- newIORef 0
+  failingStatusPosts <- newIORef 0
   let settings = Warp.setPort port $ Warp.setBeforeMainLoop (putMVar started ()) Warp.defaultSettings
   rec
-    let server = Server {tid, output, statuses, tokenLifetimeSeconds, tokenCounter, validTokens, tokenExpirationOffset}
+    let server = Server {tid, output, statuses, tokenLifetimeSeconds, tokenCounter, validTokens, tokenExpirationOffset, failingStatusPosts}
     tid <- forkIO $ Warp.runSettings settings $ app server
   takeMVar started
   pure server
@@ -149,6 +156,7 @@ clearOutput server = do
   writeIORef server.tokenCounter 0
   writeIORef server.validTokens Map.empty
   writeIORef server.tokenExpirationOffset 0
+  writeIORef server.failingStatusPosts 0
 
 getOutput :: Server -> IO [Text]
 getOutput (Server {output}) = reverse <$> readIORef output
@@ -170,3 +178,6 @@ setTokenLifetime server seconds = writeIORef server.tokenLifetimeSeconds seconds
 
 setTokenExpirationOffset :: Server -> Int -> IO ()
 setTokenExpirationOffset server seconds = writeIORef server.tokenExpirationOffset seconds
+
+setFailingStatusPosts :: Server -> Int -> IO ()
+setFailingStatusPosts server n = writeIORef server.failingStatusPosts n

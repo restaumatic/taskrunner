@@ -22,6 +22,7 @@ data Settings = Settings
   , force :: Bool
   , quietMode :: Bool
   , githubTokenRefreshThresholdSeconds :: Int
+  , githubRetryDelayMs :: Int
   , trace :: Bool
   , traceFiles :: Bool
   } deriving (Show)

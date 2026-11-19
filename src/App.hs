@@ -63,6 +63,7 @@ getSettings = do
   mainBranch <- map toText <$> lookupEnv "TASKRUNNER_MAIN_BRANCH"
   quietMode <- (==Just "1") <$> lookupEnv "TASKRUNNER_QUIET"
   githubTokenRefreshThresholdSeconds <- maybe 300 read <$> lookupEnv "TASKRUNNER_GITHUB_TOKEN_REFRESH_THRESHOLD_SECONDS"
+  githubRetryDelayMs <- maybe 1000 read <$> lookupEnv "TASKRUNNER_GITHUB_RETRY_DELAY_MS"
   pure Settings
         { stateDirectory
         , rootDirectory
@@ -79,6 +80,7 @@ getSettings = do
         , force = False
         , quietMode
         , githubTokenRefreshThresholdSeconds
+        , githubRetryDelayMs
         , trace = False
         , traceFiles = False
         }

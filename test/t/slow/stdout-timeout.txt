@@ -1,3 +1,5 @@
 # By spawning a background process, we add to refcount of the pipe.
-sleep 2 &
+# Only stdout is held up: taskrunner waits for stdout and then stderr, 1 s each,
+# so a background process holding both for 2 s races the stderr timeout.
+sleep 2 2>/dev/null &
 disown

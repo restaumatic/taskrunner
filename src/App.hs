@@ -18,7 +18,8 @@ import qualified Data.ByteString.Char8 as B8
 import Control.Concurrent.Async (async, wait, cancel)
 import Control.Exception.Base (handle)
 import System.Posix.ByteString (stdOutput, fdToHandle, handleToFd)
-import System.Posix (Fd, dup, stdError)
+import System.Posix (Fd, dup, stdError, setFdOption, FdOption (CloseOnExec))
+import qualified System.Posix.IO as Posix
 import System.Posix.Files (getFdStatus, deviceID, fileID)
 import CliArgs
 import System.FileLock (withFileLock, SharedExclusive (Exclusive))
@@ -133,8 +134,10 @@ main = do
 
     (requestPipeRead, requestPipeWrite) <- createPipe
     requestPipeWriteFd <- handleToFd requestPipeWrite
-    (responsePipeRead, responsePipeWrite) <- createPipe
-    responsePipeReadFd <- handleToFd responsePipeRead
+    (responsePipeReadFd, responsePipeWriteFd) <- Posix.createPipe
+    -- Only we may hold the write end, so that closing it gives the script EOF.
+    setFdOption responsePipeWriteFd CloseOnExec True
+    responsePipeWrite <- fdToHandle responsePipeWriteFd
     hSetBuffering responsePipeWrite LineBuffering
 
     m_traceFile <- if settings.trace then do
@@ -173,6 +176,7 @@ main = do
             [ ("BASH_FUNC_snapshot%%", "() {\n" <> $(embedStringFile "src/snapshot.sh") <> "\n}")
             , ("_taskrunner_request_pipe", show requestPipeWriteFd)
             , ("_taskrunner_response_pipe", show responsePipeReadFd)
+            , ("_taskrunner_job_name", jobName)
             ]
             <> (if settings.trace then [("_taskrunner_trace", "1")] else [])
             <> parentEnv
@@ -183,7 +187,10 @@ main = do
     logDebug appState $ "  cwd: " <> show cwd
     logDebug appState $ "  settings: " <> show settings
 
-    cmdHandler <- async $ commandHandler appState requestPipeRead responsePipeWrite
+    cmdHandler <- async $
+      commandHandler appState requestPipeRead responsePipeWrite
+        `catchAny` (\e -> logError appState $ "command handler failed: " <> show e)
+        `finally` hClose responsePipeWrite
 
     stdoutHandler <- async $ outputStreamHandler appState toplevelStdout "stdout" stdoutPipe
     stderrHandler <- async $ outputStreamHandler appState toplevelStderr "stderr" stderrPipe
@@ -434,8 +441,8 @@ commandHandler appState requestPipe responsePipe =
                 pure (Just "exit 1")
               Right args -> do
                 response <- snapshot appState args
-                  `catch` (\(e :: SomeException) -> do
-                      logError appState $ "snapshot command failed with exception: " <> show e
+                  `catchAny` (\e -> do
+                      void $ tryAny $ logError appState $ "snapshot command failed with exception: " <> show e
                       pure "exit 1")
                 pure $ Just $ encodeUtf8 response
 

@@ -1,0 +1,11 @@
+# no toplevel
+# The toplevel stderr reader goes away before the nested task calls `snapshot`.
+# fd 4 is a FIFO with no reader left, so writes to it fail with EPIPE.
+# `timeout` turns a hang into a failure. The second call checks the lock is free.
+mkfifo stderr.fifo
+exec 3<>stderr.fifo 4>stderr.fifo 3<&-
+
+timeout -k 1 10 taskrunner -n outer bash -c 'taskrunner -n inner bash -c "snapshot --raw x; echo inner ran"' 2>&4
+exec 4>&-
+
+timeout -k 1 10 taskrunner -n inner true

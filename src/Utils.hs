@@ -17,6 +17,7 @@ import GHC.IO.Handle (hIsClosed)
 import System.FilePath ((</>))
 import Control.Concurrent.Async (async, wait)
 import System.Timeout (timeout)
+import System.Environment (lookupEnv)
 import GHC.Clock (getMonotonicTime)
 
 outputLine :: AppState -> Handle -> ByteString -> ByteString -> IO ()
@@ -198,6 +199,12 @@ timeoutStream appState streamName action = do
     logWarn appState $ "taskrunner: Task did not close " <> streamName <> " " <> show appState.settings.outputStreamTimeout <> " seconds after exiting."
     logWarn appState "Perhaps the file descriptor was leaked to a background process?"
     logWarn appState "Build will continue despite this error, but some output may be lost."
+
+-- | Throws when TASKRUNNER_INJECT_FAULT names this point. For tests.
+faultPoint :: Text -> IO ()
+faultPoint name =
+  whenM ((== Just (toString name)) <$> lookupEnv "TASKRUNNER_INJECT_FAULT") $
+    bail $ "injected fault: " <> toString name
 
 ignoreResourceVanished :: IOError -> IO ()
 ignoreResourceVanished e | isResourceVanishedError e = pure ()

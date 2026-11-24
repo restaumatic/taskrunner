@@ -426,6 +426,7 @@ commandHandler :: AppState -> Handle -> Handle -> IO ()
 commandHandler appState requestPipe responsePipe =
   handle ignoreEOF $ forever do
     requestLine <- B8.hGetLine requestPipe
+    faultPoint "command-handler"
     case Aeson.eitherDecode @[String] (BL.fromStrict requestLine) of
       Left err -> do
         logError appState $ "Invalid command pipe request: " <> show requestLine <> "\nError: " <> show err

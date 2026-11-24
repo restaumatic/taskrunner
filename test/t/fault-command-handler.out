@@ -1,0 +1,4 @@
+-- output:
+[t] error | command handler failed: "injected fault: command-handler"
+[t] stderr | taskrunner: snapshot in job t got no reply, taskrunner closed the response pipe
+-- exit code: 1

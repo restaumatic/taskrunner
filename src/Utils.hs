@@ -6,7 +6,7 @@ import qualified Data.ByteString.Char8 as B8
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import Types
 import Control.Exception (throwIO, handle)
-import System.IO.Error (isEOFError, IOError)
+import System.IO.Error (isEOFError, isResourceVanishedError, IOError)
 import Text.Printf (printf)
 import Prelude (until)
 import Data.List ((!!))
@@ -46,8 +46,9 @@ outputLine appState toplevelOutput streamName line = do
           -- because the stdout and stderr handlers append concurrently.
           atomicModifyIORef' appState.quietBuffer \buffer -> (formattedLine : buffer, ())
         else
-          -- Normal mode: output immediately
-          B8.hPutStrLn toplevelOutput formattedLine
+          -- Normal mode: output immediately. The log file already has the line,
+          -- so it is dropped when the toplevel reader is gone.
+          handle ignoreResourceVanished $ B8.hPutStrLn toplevelOutput formattedLine
 
 logLevel :: MonadIO m => ByteString -> AppState -> Text -> m ()
 logLevel level appState msg =
@@ -197,6 +198,10 @@ timeoutStream appState streamName action = do
     logWarn appState $ "taskrunner: Task did not close " <> streamName <> " " <> show appState.settings.outputStreamTimeout <> " seconds after exiting."
     logWarn appState "Perhaps the file descriptor was leaked to a background process?"
     logWarn appState "Build will continue despite this error, but some output may be lost."
+
+ignoreResourceVanished :: IOError -> IO ()
+ignoreResourceVanished e | isResourceVanishedError e = pure ()
+                         | otherwise                 = throwIO e
 
 ignoreEOF :: IOError -> IO ()
 ignoreEOF e | isEOFError e = pure ()

@@ -1,0 +1,14 @@
+# A task inherits the fds it uses, and no other fds that taskrunner opened.
+# Runs nested, so the task could also inherit fds of the toplevel taskrunner.
+taskrunner -n inner bash -e -c '
+  request=$(readlink /proc/$$/fd/$_taskrunner_request_pipe)
+  for fd in /proc/$$/fd/*; do
+    n=${fd##*/}
+    target=$(readlink $fd) || continue
+    case "$target" in
+      *.log) echo "fd $n: a log file" ;;
+      /dev/null) [[ $n == 0 ]] || echo "fd $n: /dev/null" ;;
+      "$request") [[ $n == $_taskrunner_request_pipe ]] || echo "fd $n: request pipe" ;;
+    esac
+  done
+'

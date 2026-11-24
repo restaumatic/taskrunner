@@ -127,12 +127,15 @@ main = do
     -- Lock (take) it while writing a line to either `logFile` or stdout
     logFile <- openBinaryFile (logFileName settings buildId jobName) WriteMode
     hSetBuffering logFile LineBuffering
+    setCloseOnExec logFile
 
     devnull <- openBinaryFile "/dev/null" ReadMode
+    setCloseOnExec devnull
 
     (toplevelStdout, toplevelStderr) <- toplevelStreams
 
     (requestPipeRead, requestPipeWrite) <- createPipe
+    setCloseOnExec requestPipeRead
     requestPipeWriteFd <- handleToFd requestPipeWrite
     (responsePipeReadFd, responsePipeWriteFd) <- Posix.createPipe
     -- Only we may hold the write end, so that closing it gives the script EOF.

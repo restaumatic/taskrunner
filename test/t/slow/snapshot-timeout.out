@@ -1,0 +1,3 @@
+-- output:
+[t] stderr | taskrunner: snapshot in job t got no reply within 1s
+-- exit code: 1

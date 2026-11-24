@@ -1,0 +1,4 @@
+# no toplevel
+# The command handler thread dies before it replies to `snapshot`.
+# taskrunner closes the response pipe, so `snapshot` gets EOF and fails the task.
+TASKRUNNER_INJECT_FAULT=command-handler timeout -k 1 10 taskrunner -n t bash -c 'snapshot --raw x; echo should not run'

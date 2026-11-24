@@ -69,6 +69,7 @@ To use it, first build using another system, and the run `taskrunner` with `TASK
 - `TASKRUNNER_LOG_INFO` - whether to output "info" messages to toplevel output. They are minimal messages, produced only when there's actually something to be done (including fetching from cache).
 - `TASKRUNNER_GITHUB_RETRY_DELAY_MS` - first backoff delay when a GitHub API call fails with a connection error, 5xx or 429 (default: 1000). It doubles on each of the 4 retries. A commit status that still fails is logged as a warning and doesn't fail the task.
 - `TASKRUNNER_SNAPSHOT_TIMEOUT` - how many seconds `snapshot` waits for taskrunner's reply before failing the task (default: 3600).
+- `TASKRUNNER_INJECT_FAULT` - for tests: the name of a fault point (`faultPoint` in `src/Utils.hs`) that throws an exception.
 - more...
 
 ## Possible features

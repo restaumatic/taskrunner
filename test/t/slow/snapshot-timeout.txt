@@ -1,0 +1,3 @@
+# no toplevel
+# taskrunner doesn't reply to `snapshot`: the request goes to /dev/null.
+TASKRUNNER_SNAPSHOT_TIMEOUT=1 timeout -k 1 10 taskrunner -n t bash -c 'exec 9>/dev/null; _taskrunner_request_pipe=9 snapshot --raw x; echo should not run'

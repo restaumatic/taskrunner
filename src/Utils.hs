@@ -18,6 +18,9 @@ import System.FilePath ((</>))
 import Control.Concurrent.Async (async, wait)
 import System.Timeout (timeout)
 import GHC.Clock (getMonotonicTime)
+import qualified GHC.IO.Handle.FD as HandleFD
+import qualified GHC.IO.FD as FD
+import System.Posix (Fd (..), setFdOption, FdOption (CloseOnExec))
 
 outputLine :: AppState -> Handle -> ByteString -> ByteString -> IO ()
 outputLine appState toplevelOutput streamName line = do
@@ -198,6 +201,12 @@ timeoutStream appState streamName action = do
     logWarn appState $ "taskrunner: Task did not close " <> streamName <> " " <> show appState.settings.outputStreamTimeout <> " seconds after exiting."
     logWarn appState "Perhaps the file descriptor was leaked to a background process?"
     logWarn appState "Build will continue despite this error, but some output may be lost."
+
+-- | Keeps a child process from inheriting the handle's fd.
+setCloseOnExec :: Handle -> IO ()
+setCloseOnExec h = do
+  fd <- HandleFD.handleToFd h
+  setFdOption (Fd (FD.fdFD fd)) CloseOnExec True
 
 ignoreResourceVanished :: IOError -> IO ()
 ignoreResourceVanished e | isResourceVanishedError e = pure ()

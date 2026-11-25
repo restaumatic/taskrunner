@@ -40,11 +40,11 @@ jobs:
         cache-name: cache-stack
       with:
         path: ~/.stack
-        key: ${{ runner.os }}-${{ matrix.arch }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/stack.yaml') }}
+        key: ${{ matrix.runner }}-${{ matrix.arch }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/stack.yaml') }}
         restore-keys: |
-          ${{ runner.os }}-${{ matrix.arch }}-build-${{ env.cache-name }}-
-          ${{ runner.os }}-${{ matrix.arch }}-build-
-          ${{ runner.os }}-${{ matrix.arch }}-
+          ${{ matrix.runner }}-${{ matrix.arch }}-build-${{ env.cache-name }}-
+          ${{ matrix.runner }}-${{ matrix.arch }}-build-
+          ${{ matrix.runner }}-${{ matrix.arch }}-
     - name: Build dependencies
       run: |
         stack --no-terminal build --test --only-dependencies
